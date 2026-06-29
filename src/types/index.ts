@@ -1,0 +1,264 @@
+// ============================================================
+// 类型定义 - 个人健身 AI 助手
+// ============================================================
+// --- RPE 量表 (1-10) ---
+export type RPE = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
+// --- 用户目标 ---
+export type UserGoal = 'muscle_gain' | 'fat_loss' | 'strength' | 'endurance';
+// --- 活动水平 (PAL) ---
+export type ActivityLevel = 'sedentary' | 'light' | 'moderate' | 'active' | 'very_active';
+// --- 训练动作类型 ---
+export type ExerciseType =
+  | "bench_press"
+  | "squat"
+  | "deadlift"
+  | "overhead_press"
+  | "barbell_row"
+  | "pull_up"
+  | "dumbbell_fly"
+  | "leg_press"
+  | "leg_curl"
+  | "leg_extension"
+  | "lateral_raise"
+  | "bicep_curl"
+  | "tricep_pushdown"
+  | "cable_crossover"
+  | "dumbbell_shoulder_press"
+  | "face_pull"
+  | "hip_thrust"
+  | "calf_raise"
+  | "plank"
+  | "push_up"
+  | "dip"
+  | "running"
+  | "swimming"
+  | "cycling"
+  | "rowing"
+  | "jumping_rope"
+  | "other";
+// --- 有氧运动类型 ---
+export interface CardioDetail {
+  type: "steady" | "hiit" | "fartlek" | "intervals";
+  intensity?: "low" | "moderate" | "high";
+  distance_meters?: number;
+  average_heart_rate?: number;
+}
+// --- 单个动作组 ---
+export interface ExerciseSet {
+  set_number: number;
+  reps: number;
+  weight_kg: number;
+  rpe: RPE;
+  is_warmup: boolean;
+  notes?: string;
+}
+// --- 单个动作 ---
+export interface Exercise {
+  name: string;
+  exercise_type: ExerciseType;
+  is_cardio: boolean;
+  sets: ExerciseSet[];
+  cardio_detail?: CardioDetail;
+  total_duration_minutes?: number;
+}
+// --- 训练会话 ---
+export interface SessionData {
+  exercises: Exercise[];
+  cardio_exercises?: Exercise[];
+  total_volume_kg: number;
+  session_rpe: RPE;
+  duration_minutes: number;
+  notes?: string;
+  felt?: string;
+}
+// --- 生活反馈 ---
+export interface LifestyleFeedback {
+  id: string;
+  user_id: string;
+  cycle_id: string;
+  sleep_quality: 1 | 2 | 3 | 4 | 5;
+  stress_level: 1 | 2 | 3 | 4 | 5;
+  activity_change: 'more' | 'less' | 'same';
+  special_condition: 'sick' | 'travel' | 'none';
+  notes?: string;
+  created_at: string;
+}
+// --- 用户设置 (key-value) ---
+export interface UserSetting {
+  id: string;
+  user_id: string;
+  key: string;
+  value: string;
+  updated_at: string;
+}
+// --- MET 常量 ---
+export interface MetConstant {
+  id: string;
+  action_name: string;
+  met_value: number;
+  category: 'strength' | 'cardio' | 'other';
+  source: 'manual' | 'ai_learned' | 'compendium';
+  is_user_added: boolean;
+}
+// --- 未知动作 ---
+export interface UnknownAction {
+  id: string;
+  user_id: string;
+  action_name: string;
+  context?: string;
+  is_learned: boolean;
+  suggested_met?: number;
+  created_at: string;
+}
+// --- 个人纪录 ---
+export interface PersonalRecord {
+  id: string;
+  user_id: string;
+  exercise: string;
+  weight_kg: number;
+  reps: number;
+  estimated_1rm: number;
+  record_date: string;
+  notes?: string;
+}
+// --- 数据库行类型 ---
+export interface User {
+  id: string;
+  email: string;
+  name: string;
+  gender: string;
+  age: number;
+  weight_kg: number;
+  height_cm: number;
+  activity_level: ActivityLevel;
+  goal: UserGoal;
+  created_at: string;
+  updated_at: string;
+}
+export interface Cycle {
+  id: string;
+  user_id: string;
+  name: string;
+  start_date: string;
+  end_date: string | null;
+  is_active: boolean;
+  notes: string | null;
+  goal: UserGoal | null;
+  tdee_adjusted: number | null;
+  adjustment_plan: CycleAdjustment | null;
+  created_at: string;
+  updated_at: string;
+}
+export interface Workout {
+  id: string;
+  user_id: string;
+  cycle_id: string;
+  session_data: SessionData;
+  raw_input: string | null;
+  performed_at: string;
+  created_at: string;
+}
+// --- 周期调整方案 ---
+export interface ExerciseAdjustment {
+  exercise: string;
+  exercise_type: ExerciseType;
+  current_sets: number;
+  target_sets: number;
+  target_reps: string;
+  target_weight_adjustment: string;
+  rationale: string;
+}
+export interface CycleAdjustment {
+  summary: CycleSummary;
+  next_cycle_plan: {
+    name?: string;
+    duration_weeks: number;
+    adjustments: ExerciseAdjustment[];
+    overall_focus: string;
+    deload_week: boolean;
+  };
+}
+// --- 周期摘要 ---
+export interface CycleSummary {
+  total_workouts: number;
+  total_volume_kg: number;
+  average_volume_per_session: number;
+  average_session_rpe: RPE;
+  volume_trend: "increasing" | "stable" | "decreasing";
+  pr_sets: number;
+  exercises_summary: ExerciseSummary[];
+}
+export interface ExerciseSummary {
+  exercise: string;
+  exercise_type: ExerciseType;
+  total_sets: number;
+  total_reps: number;
+  total_volume_kg: number;
+  best_set: {
+    weight_kg: number;
+    reps: number;
+    rpe: RPE;
+    date: string;
+  } | null;
+  average_rpe: number;
+}
+// --- 扩展周期摘要（含代谢数据）---
+export interface EnhancedCycleSummary extends CycleSummary {
+  tdee_adjusted: number;
+  maintenance_calories: number;
+  total_calories_burned: number;
+  estimated_calories_per_session: number;
+  pr_updates: {
+    exercise: string;
+    old_1rm: number;
+    new_1rm: number;
+  }[];
+}
+// --- API 请求/响应类型 ---
+export interface ExtractWorkoutRequest {
+  text: string;
+  cycle_id: string;
+}
+export interface ExtractWorkoutResponse {
+  success: boolean;
+  workout?: Workout;
+  error?: string;
+}
+export interface AdjustCycleRequest {
+  cycle_id: string;
+  feedback: string;
+}
+export interface AdjustCycleResponse {
+  success: boolean;
+  adjustment?: CycleAdjustment;
+  error?: string;
+}
+export interface StatsResponse {
+  cycles: {
+    id: string;
+    name: string;
+    start_date: string;
+    end_date: string | null;
+    total_volume: number;
+    workout_count: number;
+  }[];
+  volume_trend: {
+    date: string;
+    volume: number;
+    session_rpe: number;
+  }[];
+  current_cycle_summary: CycleSummary | null;
+}
+// --- TDEE 计算相关 ---
+export interface TdeeResult {
+  bmr: number;
+  tdee_baseline: number;
+  pal: number;
+  tdee_adjusted: number;
+  adjustments: {
+    sleep_adjustment: number;
+    stress_adjustment: number;
+    activity_change_adjustment: number;
+    sick_adjustment: number;
+  };
+}
