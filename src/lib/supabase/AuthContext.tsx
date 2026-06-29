@@ -38,6 +38,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const supabase = createClient();
   useEffect(() => {
+    // 环境变量未就绪（如构建/预渲染阶段），跳过
+    if (!supabase) {
+      setLoading(false);
+      return;
+    }
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null);
       setLoading(false);
@@ -52,26 +57,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [supabase]);
   const isAnonymous = user?.is_anonymous ?? false;
   const signUp = useCallback(async (email: string, password: string) => {
+    if (!supabase) return { error: "客户端未初始化" };
     const { error } = await supabase.auth.signUp({ email, password });
     if (error) return { error: error.message };
     return {};
   }, [supabase]);
   const signInWithEmail = useCallback(async (email: string, password: string) => {
+    if (!supabase) return { error: "客户端未初始化" };
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) return { error: error.message };
     return {};
   }, [supabase]);
   const signInAnonymously = useCallback(async () => {
+    if (!supabase) return { error: "客户端未初始化" };
     const { error } = await supabase.auth.signInAnonymously();
     if (error) return { error: error.message };
     return {};
   }, [supabase]);
   const linkEmail = useCallback(async (email: string, password: string) => {
-    // 先注册邮箱账号
+    if (!supabase) return { error: "客户端未初始化" };
     const { data, error: signUpError } = await supabase.auth.signUp({ email, password });
     if (signUpError) return { error: signUpError.message };
     if (!data.user) return { error: "注册失败" };
-    // 将匿名会话的身份链接到新账号
     const { error: linkError } = await supabase.auth.linkIdentity({ 
       provider: 'email',
       options: { email, password }
@@ -80,6 +87,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return {};
   }, [supabase]);
   const resetPassword = useCallback(async (email: string) => {
+    if (!supabase) return { error: "客户端未初始化" };
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: `${window.location.origin}/auth/callback`,
     });
@@ -87,11 +95,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return {};
   }, [supabase]);
   const updatePassword = useCallback(async (newPassword: string) => {
+    if (!supabase) return { error: "客户端未初始化" };
     const { error } = await supabase.auth.updateUser({ password: newPassword });
     if (error) return { error: error.message };
     return {};
   }, [supabase]);
   const signOut = useCallback(async () => {
+    if (!supabase) return;
     await supabase.auth.signOut();
     setUser(null);
   }, [supabase]);

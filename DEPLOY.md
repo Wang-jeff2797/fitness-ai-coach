@@ -19,15 +19,16 @@ git push -u origin main
 1. 打开 [vercel.com](https://vercel.com) → **Add New → Project**
 2. 选择刚推送的 `fitness-ai-coach` 仓库
 3. **Framework Preset** 会自动识别为 `Next.js`
-4. 在 **Environment Variables** 中添加以下变量：
+4. 在 **Environment Variables** 中添加以下变量（**必须在 Deploy 前添加，否则构建会失败**）：
 | 变量名 | 值 |
 |---|---|
 | `NEXT_PUBLIC_SUPABASE_URL` | `https://nlbuvrsecasrafcliufy.supabase.co` |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | `sb_publishable_0Y9U4zBqipwclXpjMA9ABQ_ahIPdXTH` |
-| `SUPABASE_SERVICE_ROLE_KEY` | 你的 `service_role key`（在 Supabase → Settings → API → service_role） |
+| `SUPABASE_SERVICE_ROLE_KEY` | 你的 `service_role key`（在 Supabase → Settings → API → service_role 找到） |
 | `DEEPSEEK_API_KEY` | 你的 DeepSeek API Key |
 | `DEEPSEEK_BASE_URL` | `https://api.deepseek.com/v1` |
 | `DEEPSEEK_MODEL` | `deepseek-chat` |
+> **⚠️ 重要**：`NEXT_PUBLIC_` 开头的变量必须在构建时可用，如果部署后修改了它们，需要在 Vercel 项目 → **Deployments** → 点击最顶部部署右侧的 **...** → **Redeploy** 重新构建。
 5. 点击 **Deploy**，等待部署完成（约 2 分钟）
 6. 部署完成后 Vercel 会给一个域名，例如：`fitness-ai-coach.vercel.app`（取决于你 Vercel 上的项目名称）
 ---
