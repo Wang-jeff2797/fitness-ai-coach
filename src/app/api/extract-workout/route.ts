@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabaseClient, getServerUser } from "@/lib/supabase/server";
 import { callDeepSeekJSON } from "@/lib/ai/deepseek";
 import { EXTRACT_WORKOUT_SYSTEM_PROMPT } from "@/lib/ai/prompts";
-import { findMetMatch } from "@/lib/analytics/met-calories";
-import { estimateSessionCalories } from "@/lib/analytics/met-calories";
+import { findMetMatch, estimateSessionCalories } from "@/lib/analytics/met-calories";
 import type { SessionData, ExtractWorkoutRequest, ExtractWorkoutResponse } from "@/types";
+export const dynamic = 'force-dynamic';
 export async function POST(request: NextRequest) {
   try {
     const user = await getServerUser();

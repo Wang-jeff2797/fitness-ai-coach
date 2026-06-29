@@ -6,6 +6,7 @@ import { computeCycleSummary } from "@/lib/analytics/cycle-summary";
 import { calculateTDEE, getCalorieTarget } from "@/lib/analytics/tdee";
 import { estimate1RM } from "@/lib/analytics/1rm";
 import type { AdjustCycleRequest, AdjustCycleResponse, CycleAdjustment, EnhancedCycleSummary, PersonalRecord } from "@/types";
+export const dynamic = 'force-dynamic';
 export async function POST(request: NextRequest) {
   try {
     const user = await getServerUser();

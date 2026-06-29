@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabaseClient, getServerUser } from "@/lib/supabase/server";
 import { computeCycleSummary } from "@/lib/analytics/cycle-summary";
 import type { StatsResponse, CycleSummary } from "@/types";
+export const dynamic = 'force-dynamic';
 export async function GET(request: NextRequest) {
   try {
     const user = await getServerUser();

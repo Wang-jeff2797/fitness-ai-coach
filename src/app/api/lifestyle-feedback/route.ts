@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabaseClient, getServerUser } from "@/lib/supabase/server";
 import { calculateTDEE } from "@/lib/analytics/tdee";
+export const dynamic = 'force-dynamic';
 export async function GET(request: NextRequest) {
   try {
     const user = await getServerUser();

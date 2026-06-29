@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabaseClient, getServerUser } from "@/lib/supabase/server";
 import { callDeepSeekJSON } from "@/lib/ai/deepseek";
+export const dynamic = 'force-dynamic';
 const LEARN_ACTION_PROMPT = `你是一个运动科学专家，参考《2011体力活动概要》(Compendium of Physical Activities)。
 对于用户提供的一个健身动作名称，你需要：
 1. 判断它是力量训练还是有氧运动
