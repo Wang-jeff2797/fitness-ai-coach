@@ -2,9 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabaseClient, getServerUser } from "@/lib/supabase/server";
 import { calculateTDEE, getCalorieTarget } from "@/lib/analytics/tdee";
 import type { TodayDashboard, CyclePlan, PlanDay } from "@/types";
-
 export const dynamic = 'force-dynamic';
-
 function getWeekRange(ref: Date): { start: Date; end: Date } {
   const d = new Date(ref);
   const day = d.getDay();
@@ -16,21 +14,17 @@ function getWeekRange(ref: Date): { start: Date; end: Date } {
   sunday.setHours(23, 59, 59, 999);
   return { start: monday, end: sunday };
 }
-
 export async function GET(_: NextRequest) {
   try {
     const user = await getServerUser();
     if (!user) return NextResponse.json({ error: "未登录" }, { status: 401 });
     const supabase = await createServerSupabaseClient();
-
     // --- 用户资料 ---
     const { data: profile } = await supabase
       .from("users").select("*").eq("id", user.id).maybeSingle();
-
     // --- 活跃周期 ---
     const { data: activeCycle } = await supabase
       .from("cycles").select("*").eq("user_id", user.id).eq("is_active", true).maybeSingle();
-
     // --- 今日生活反馈（用于 TDEE 修正）---
     let tdeeAdjusted = 0;
     let calorieTarget = 0;
@@ -61,7 +55,6 @@ export async function GET(_: NextRequest) {
       tdeeAdjusted = t.tdee_adjusted;
       calorieTarget = getCalorieTarget(tdeeAdjusted, profile?.goal);
     }
-
     // --- 周期关联的计划 ---
     let activePlan: CyclePlan | null = null;
     if (activeCycle?.plan_id) {
@@ -81,12 +74,10 @@ export async function GET(_: NextRequest) {
         activePlan = { ...(plan as any), days: Array.from(dayMap.values()) };
       }
     }
-
     // --- 今日 day_of_week（0=周日）---
     const today = new Date();
     const todayDow = today.getDay();
     const todayStr = today.toISOString().slice(0, 10);
-
     // --- 今日计划（匹配 day_of_week）---
     let todayPlan: PlanDay | null = null;
     let totalSetsToday = 0;
@@ -99,7 +90,6 @@ export async function GET(_: NextRequest) {
         }
       }
     }
-
     // --- 今日已消耗（今日 workouts 中记录的 kcal）---
     const start = new Date(todayStr + "T00:00:00");
     const end = new Date(todayStr + "T23:59:59");
@@ -115,7 +105,6 @@ export async function GET(_: NextRequest) {
       const m = note.match(/预估消耗:\s*(\d+)\s*kcal/);
       if (m) caloriesToday += Number(m[1]);
     }
-
     // --- 本周已完成训练数 + 本周总消耗 ---
     const week = getWeekRange(today);
     const { data: weekWorkouts } = await supabase
@@ -130,11 +119,41 @@ export async function GET(_: NextRequest) {
       const m = note.match(/预估消耗:\s*(\d+)\s*kcal/);
       if (m) weekCalories += Number(m[1]);
     }
-
     const weeklyCalorieTarget = tdeeAdjusted * 7;
     const workoutsCompletedThisWeek = weekWorkouts?.length || 0;
     const workoutsPlannedThisWeek = activePlan ? (activePlan.days?.filter(d => !d.is_rest_day).length || 0) : 0;
-
+    // --- 今日完成度数据 ---
+    let todayCompletionData = null;
+    if (activePlan && todayPlan && !todayPlan.is_rest_day && todayPlan.exercises && todayPlan.exercises.length > 0) {
+      const { data: todayCompletions } = await supabase
+        .from("exercise_completions")
+        .select("exercise_id")
+        .eq("user_id", user.id)
+        .eq("plan_id", activePlan.id)
+        .eq("completed_date", todayStr);
+      const completedIds = new Set((todayCompletions || []).map((c: any) => c.exercise_id));
+      const completions = (todayPlan.exercises || []).map(ex => ({
+        exercise_id: ex.id!,
+        is_completed: completedIds.has(ex.id!),
+      }));
+      const totalExs = todayPlan.exercises.length;
+      const completedExs = completions.filter(c => c.is_completed).length;
+      todayCompletionData = {
+        plan_id: activePlan.id!,
+        plan_name: activePlan.name!,
+        day_id: todayPlan.id!,
+        completions,
+        total_exercises: totalExs,
+        completed_exercises: completedExs,
+        percentage: totalExs > 0 ? Math.round((completedExs / totalExs) * 100) : 0,
+      };
+    }
+    // --- 所有可用的计划（用于计划选择器）---
+    const { data: allPlans } = await supabase
+      .from("cycle_plans")
+      .select("*")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false });
     const dashboard: TodayDashboard = {
       today_weekday: todayDow,
       calorie_target: calorieTarget,
@@ -152,8 +171,10 @@ export async function GET(_: NextRequest) {
         tdee_adjusted: tdeeAdjusted,
         plan: activePlan,
       } : null,
+      // 新增完成度数据
+      today_completion: todayCompletionData,
+      available_plans: allPlans || [],
     };
-
     return NextResponse.json(dashboard);
   } catch (err) {
     console.error("dashboard GET error:", err);

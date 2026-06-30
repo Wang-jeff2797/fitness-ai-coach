@@ -159,8 +159,72 @@ export async function POST(request: NextRequest) {
         }
       }
     }
-    return NextResponse.json<ExtractWorkoutResponse>(
-      { success: true, workout },
+    // === 如果关联了计划，自动匹配动作完成度 ===
+    let completedCount = 0;
+    if (body.plan_id && sessionData.exercises && sessionData.exercises.length > 0) {
+      try {
+        const todayStr = new Date().toISOString().slice(0, 10);
+        const todayDow = new Date().getDay();
+        // 获取计划中今天的训练日的所有动作
+        const { data: planDays } = await supabase
+          .from("plan_days")
+          .select("id, day_of_week")
+          .eq("plan_id", body.plan_id)
+          .eq("user_id", user.id)
+          .eq("day_of_week", todayDow);
+        if (planDays && planDays.length > 0) {
+          const todayDayId = planDays[0].id;
+          const { data: planExs } = await supabase
+            .from("plan_exercises")
+            .select("id, exercise_name")
+            .eq("day_id", todayDayId)
+            .eq("plan_id", body.plan_id)
+            .eq("user_id", user.id);
+          if (planExs && planExs.length > 0) {
+            // 模糊匹配：将用户输入的动作名与计划动作名进行匹配
+            const userExerciseNames = Array.from(
+              new Set(sessionData.exercises.map(e => e.name.trim().toLowerCase()))
+            );
+            const completionRecords: any[] = [];
+            for (const planEx of planExs) {
+              const planName = planEx.exercise_name.trim().toLowerCase();
+              // 检查用户是否做了这个动作
+              let matched = false;
+              for (const userName of userExerciseNames) {
+                // 完全匹配或包含关系
+                if (userName === planName || userName.includes(planName) || planName.includes(userName)) {
+                  matched = true;
+                  break;
+                }
+              }
+              if (matched) {
+                completionRecords.push({
+                  user_id: user.id,
+                  plan_id: body.plan_id,
+                  day_id: todayDayId,
+                  exercise_id: planEx.id,
+                  completed_date: todayStr,
+                  source: 'auto',
+                });
+              }
+            }
+            if (completionRecords.length > 0) {
+              const { error: compErr } = await supabase
+                .from("exercise_completions")
+                .upsert(completionRecords, {
+                  onConflict: "user_id, exercise_id, completed_date",
+                  ignoreDuplicates: false,
+                });
+              if (!compErr) completedCount = completionRecords.length;
+            }
+          }
+        }
+      } catch (e) {
+        console.error("Auto-complete matching error:", e);
+      }
+    }
+    return NextResponse.json(
+      { success: true, workout, completed_count: completedCount },
       { status: 200 }
     );
   } catch (err) {

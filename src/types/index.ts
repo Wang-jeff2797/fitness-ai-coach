@@ -220,6 +220,7 @@ export interface EnhancedCycleSummary extends CycleSummary {
 export interface ExtractWorkoutRequest {
   text: string;
   cycle_id: string;
+  plan_id?: string;
 }
 export interface ExtractWorkoutResponse {
   success: boolean;
@@ -342,6 +343,18 @@ export interface TodayDashboard {
     tdee_adjusted: number | null;
     plan: CyclePlan | null;
   } | null;
+  /** 今日完成度数据 */
+  today_completion: {
+    plan_id: string;
+    plan_name: string;
+    day_id: string;
+    completions: { exercise_id: string; is_completed: boolean }[];
+    total_exercises: number;
+    completed_exercises: number;
+    percentage: number;
+  } | null;
+  /** 所有可用的计划列表（用于计划选择器） */
+  available_plans: CyclePlan[];
 }
 // --- 肌肉群常量 ---
 export type MuscleGroup =
@@ -368,4 +381,43 @@ export interface ExerciseRecommendation {
   usage_count: number;
   is_favorite: boolean;
   reason?: string;
+}
+// --- 动作完成度追踪 ---
+export interface ExerciseCompletion {
+  id?: string;
+  user_id?: string;
+  plan_id: string;
+  day_id: string;
+  exercise_id: string;
+  completed_date: string;
+  is_completed?: boolean;
+  completed_sets?: number | null;
+  completed_reps?: string | null;
+  completed_weight_kg?: number | null;
+  source?: 'manual' | 'auto';
+  created_at?: string;
+  updated_at?: string;
+}
+export interface CreateCompletionRequest {
+  plan_id: string;
+  day_id: string;
+  exercise_id: string;
+  completed_date?: string;
+  completed_sets?: number | null;
+  completed_reps?: string | null;
+  completed_weight_kg?: number | null;
+}
+export interface PlanCompletionStats {
+  /** 今日完成动作数 */
+  today_completed: number;
+  /** 今日计划总动作数 */
+  today_total: number;
+  /** 今日完成度百分比 (0-100) */
+  today_percentage: number;
+  /** 计划总完成天数（非休息日被完成的次数） */
+  total_completed_days: number;
+  /** 计划总训练天数（非休息日总数） */
+  total_training_days: number;
+  /** 计划整体完成度百分比 (0-100) */
+  overall_percentage: number;
 }

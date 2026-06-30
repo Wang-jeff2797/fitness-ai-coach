@@ -3,13 +3,14 @@ import { useState, useEffect, useRef } from "react";
 import {
   Plus, Loader2, CheckCircle2, AlertCircle, Brain,
   ChevronLeft, Trash2, Edit3, Save, Target,
-  CalendarDays, Dumbbell, Sparkles, RotateCcw,
+  CalendarDays, Dumbbell, Sparkles, RotateCcw, TrendingUp, Zap,
 } from "lucide-react";
 import type {
-  Cycle, CyclePlan, PlanDay, PlanExercise, UserGoal, CycleAdjustment,
+  Cycle, CyclePlan, PlanDay, PlanExercise, UserGoal, CycleAdjustment, PlanCompletionStats,
 } from "@/types";
 import { COMMON_DAY_KEYWORDS, INTENSITY_COLORS, calcDayIntensity, calcTotalVolume, calcIntensityLevel, normalizeExerciseName } from "@/lib/exercise-utils";
 import { MUSCLE_GROUPS } from "@/lib/exercise-library";
+import PlanDetailPage from "./PlanDetailPage";
 interface CycleManagerProps {
   onRefresh?: () => void;
 }
@@ -33,9 +34,13 @@ export default function CycleManager({ onRefresh }: CycleManagerProps) {
   const [cycles, setCycles] = useState<Cycle[]>([]);
   const [plans, setPlans] = useState<CyclePlan[]>([]);
   const [loading, setLoading] = useState(true);
-  const [view, setView] = useState<"list" | "wizard" | "detail">("list");
+  const [view, setView] = useState<"list" | "wizard" | "detail" | "plan_detail">("list");
   const [detailPlan, setDetailPlan] = useState<CyclePlan | null>(null);
+  const [detailPlanId, setDetailPlanId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [planStatsMap, setPlanStatsMap] = useState<Map<string, PlanCompletionStats>>(new Map());
+  const [deletingPlanId, setDeletingPlanId] = useState<string | null>(null);
+  const [planDeleteConfirm, setPlanDeleteConfirm] = useState<string | null>(null);
   // === 向导状态 ===
   const [wizStep, setWizStep] = useState(1);
   const [wizGoal, setWizGoal] = useState<UserGoal>("muscle_gain");
@@ -58,6 +63,7 @@ export default function CycleManager({ onRefresh }: CycleManagerProps) {
     });
   }, [wizPerWeek]);
   const { colorMap } = useGoals();
+  const triggerRefreshAll = () => { onRefresh?.(); loadAll(); };
   const loadAll = () => {
     setLoading(true);
     Promise.all([
@@ -66,6 +72,20 @@ export default function CycleManager({ onRefresh }: CycleManagerProps) {
     ]).then(([cyc, pln]: any) => {
       setCycles(cyc.cycles || []);
       setPlans(pln.plans || []);
+      // 异步加载每个计划的完成度统计
+      const allPlans: CyclePlan[] = pln.plans || [];
+      allPlans.forEach(p => {
+        if (p.id) {
+          fetch(`/api/plan-completions?plan_id=${p.id}&stats=true`)
+            .then(r => r.json())
+            .then(d => {
+              if (d.stats) {
+                setPlanStatsMap(prev => new Map(prev).set(p.id!, d.stats));
+              }
+            })
+            .catch(() => {});
+        }
+      });
     }).catch(() => {}).finally(() => setLoading(false));
   };
   useEffect(() => { loadAll(); }, []);
@@ -348,6 +368,16 @@ export default function CycleManager({ onRefresh }: CycleManagerProps) {
     </div>
   );
 }
+  // ============ 计划展示页（含完成度）============
+  if (view === "plan_detail" && detailPlanId) {
+    return (
+      <PlanDetailPage
+        planId={detailPlanId}
+        onBack={() => { setView("list"); setDetailPlanId(null); loadAll(); }}
+        onRefresh={triggerRefreshAll}
+      />
+    );
+  }
   // ============ 详情视图（编辑计划）============
   if (view === "detail" && detailPlan) {
     return (
@@ -380,6 +410,7 @@ export default function CycleManager({ onRefresh }: CycleManagerProps) {
       {/* 活跃周期卡片 */}
       {cycles.filter(c => c.is_active).map(c => {
         const plan = plans.find(p => p.id === (c as any).plan_id) || plans.find(p => p.cycle_id === c.id);
+        const stats = plan?.id ? planStatsMap.get(plan.id) : undefined;
         return (
           <div key={c.id} className="card overflow-hidden border-primary-200 ring-1 ring-primary-100">
             <div className="bg-gradient-to-r from-primary-50 to-white p-4">
@@ -402,11 +433,30 @@ export default function CycleManager({ onRefresh }: CycleManagerProps) {
                   代谢参考 <b>{c.tdee_adjusted} kcal/天</b>
                 </p>
               )}
+              {/* 完成度进度条 */}
+              {plan && stats && (
+                <div className="mt-2 space-y-1">
+                  <div className="flex items-center justify-between text-[10px] text-gray-500">
+                    <span className="flex items-center gap-1"><Zap className="w-2.5 h-2.5 text-primary-500" />计划完成度</span>
+                    <span className="font-medium text-gray-700">{stats.overall_percentage}%</span>
+                  </div>
+                  <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                    <div className="h-full bg-gradient-to-r from-primary-500 to-primary-600 rounded-full transition-all"
+                      style={{ width: `${stats.overall_percentage}%` }} />
+                  </div>
+                </div>
+              )}
               {plan && (
-                <button onClick={() => openDetail(plan.id!)}
-                  className="mt-3 w-full py-2 text-[11px] font-medium text-primary-600 bg-white rounded-xl hover:bg-primary-50 transition-colors">
-                  <Dumbbell className="w-3 h-3 inline mr-1" />查看训练计划（{plan.workouts_per_week}练/周 · {plan.duration_weeks}周）
-                </button>
+                <div className="flex gap-2 mt-3">
+                  <button onClick={() => { setDetailPlanId(plan.id!); setView("plan_detail"); }}
+                    className="flex-1 py-2 text-[11px] font-medium text-primary-600 bg-white rounded-xl hover:bg-primary-50 transition-colors">
+                    <Dumbbell className="w-3 h-3 inline mr-1" />开始训练
+                  </button>
+                  <button onClick={() => openDetail(plan.id!)}
+                    className="py-2 px-3 text-[11px] font-medium text-gray-500 bg-white rounded-xl hover:bg-gray-50 transition-colors border border-gray-100">
+                    <Edit3 className="w-3 h-3" />
+                  </button>
+                </div>
               )}
               {!plan && (
                 <button onClick={() => setView("wizard")}
@@ -433,6 +483,8 @@ export default function CycleManager({ onRefresh }: CycleManagerProps) {
       {/* 未激活的计划 */}
       {plans.filter(p => !cycleOfPlan(p.id!)?.is_active).map(p => {
         const cycle = cycleOfPlan(p.id!);
+        const stats = p.id ? planStatsMap.get(p.id) : undefined;
+        const showDelete = planDeleteConfirm === p.id;
         return (
           <div key={p.id} className="card p-4">
             <div className="flex items-center justify-between mb-1.5">
@@ -444,13 +496,59 @@ export default function CycleManager({ onRefresh }: CycleManagerProps) {
             <h3 className="text-sm font-semibold text-gray-900">{p.name}</h3>
             {cycle && <p className="text-[10px] text-gray-500 mt-0.5">关联周期：{cycle.name}</p>}
             {p.notes && <p className="text-[10px] text-gray-500 mt-1">{p.notes}</p>}
+            {/* 完成度进度条 */}
+            {stats && stats.total_training_days > 0 && (
+              <div className="mt-2 space-y-1">
+                <div className="flex items-center justify-between text-[10px] text-gray-500">
+                  <span className="flex items-center gap-1"><TrendingUp className="w-2.5 h-2.5 text-green-500" />完成度</span>
+                  <span className="font-medium text-gray-700">{stats.overall_percentage}%</span>
+                </div>
+                <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                  <div className="h-full bg-gradient-to-r from-green-400 to-green-500 rounded-full transition-all"
+                    style={{ width: `${stats.overall_percentage}%` }} />
+                </div>
+              </div>
+            )}
             <div className="flex gap-2 mt-3">
-              <button onClick={() => openDetail(p.id!)} className="btn-secondary flex-1 text-[11px] py-2">
-                <Edit3 className="w-3 h-3 mr-1" />编辑
-              </button>
-              {!cycleOfPlan(p.id!) && (
-                <button onClick={() => { setWizResultPlanId(p.id!); setWizGoal(p.goal); setWizWeeks(p.duration_weeks); setWizPerWeek(p.workouts_per_week); activatePlanAsCycle(p.id!) }}
-                  className="btn-primary flex-1 text-[11px] py-2">激活周期</button>
+              {showDelete ? (
+                <div className="flex gap-1.5 w-full">
+                  <button onClick={async () => {
+                    setDeletingPlanId(p.id!);
+                    try {
+                      await fetch(`/api/cycle-plans?id=${p.id}`, { method: "DELETE" });
+                      loadAll();
+                    } finally {
+                      setDeletingPlanId(null);
+                      setPlanDeleteConfirm(null);
+                    }
+                  }} disabled={deletingPlanId === p.id}
+                    className="px-3 py-2 text-[11px] font-medium bg-red-600 text-white rounded-xl hover:bg-red-700 transition-colors flex items-center gap-1">
+                    {deletingPlanId === p.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+                    确认删除
+                  </button>
+                  <button onClick={() => setPlanDeleteConfirm(null)}
+                    className="px-3 py-2 text-[11px] font-medium bg-gray-100 text-gray-600 rounded-xl hover:bg-gray-200 transition-colors">
+                    取消
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <button onClick={() => { setDetailPlanId(p.id!); setView("plan_detail"); }}
+                    className="btn-secondary flex-1 text-[11px] py-2">
+                    <Dumbbell className="w-3 h-3 mr-1" />查看
+                  </button>
+                  <button onClick={() => openDetail(p.id!)} className="btn-secondary text-[11px] py-2 px-3">
+                    <Edit3 className="w-3 h-3" />
+                  </button>
+                  <button onClick={() => setPlanDeleteConfirm(p.id!)}
+                    className="p-2 rounded-xl text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors">
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                  {!cycleOfPlan(p.id!) && (
+                    <button onClick={() => { setWizResultPlanId(p.id!); setWizGoal(p.goal); setWizWeeks(p.duration_weeks); setWizPerWeek(p.workouts_per_week); activatePlanAsCycle(p.id!) }}
+                      className="btn-primary text-[11px] py-2 px-3">激活</button>
+                  )}
+                </>
               )}
             </div>
           </div>

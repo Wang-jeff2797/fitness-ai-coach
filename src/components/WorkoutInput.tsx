@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
-import { Send, Loader2, Mic } from "lucide-react";
-import type { Cycle } from "@/types";
+import { Send, Loader2, Mic, Target } from "lucide-react";
+import type { Cycle, CyclePlan } from "@/types";
 import ExerciseSuggestions from "./ExerciseSuggestions";
 interface WorkoutInputProps {
   onSuccess?: () => void;
@@ -12,6 +12,8 @@ export default function WorkoutInput({ onSuccess }: WorkoutInputProps) {
   const [lastWord, setLastWord] = useState("");
   const [cycleId, setCycleId] = useState<string>("");
   const [cycles, setCycles] = useState<Cycle[]>([]);
+  const [plans, setPlans] = useState<CyclePlan[]>([]);
+  const [selectedPlanId, setSelectedPlanId] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<{
     success: boolean;
@@ -24,15 +26,20 @@ export default function WorkoutInput({ onSuccess }: WorkoutInputProps) {
     setLastWord(last);
     setShowSuggestions(last.length >= 1 && !val.endsWith("kg") && !val.endsWith("组") && !val.endsWith("次"));
   };
-  // 加载活跃周期
+  // 加载活跃周期和计划
   useEffect(() => {
-    fetch("/api/cycles")
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.cycles) {
-          setCycles(data.cycles);
-          const active = data.cycles.find((c: Cycle) => c.is_active);
+    Promise.all([
+      fetch("/api/cycles").then((r) => r.json()),
+      fetch("/api/cycle-plans").then((r) => r.json()),
+    ])
+      .then(([cycData, planData]) => {
+        if (cycData.cycles) {
+          setCycles(cycData.cycles);
+          const active = cycData.cycles.find((c: Cycle) => c.is_active);
           if (active) setCycleId(active.id);
+        }
+        if (planData.plans) {
+          setPlans(planData.plans);
         }
       })
       .catch(() => {});
@@ -45,11 +52,15 @@ export default function WorkoutInput({ onSuccess }: WorkoutInputProps) {
       const res = await fetch("/api/extract-workout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: text.trim(), cycle_id: cycleId }),
+        body: JSON.stringify({
+          text: text.trim(),
+          cycle_id: cycleId,
+          plan_id: selectedPlanId || undefined,
+        }),
       });
       const data = await res.json();
       if (data.success) {
-        setResult({ success: true, message: "训练记录已保存！" });
+        setResult({ success: true, message: "训练记录已保存！" + (data.completed_count ? ` 已关联 ${data.completed_count} 个计划动作` : "") });
         setText("");
         setShowSuggestions(false);
         onSuccess?.();
@@ -76,23 +87,44 @@ export default function WorkoutInput({ onSuccess }: WorkoutInputProps) {
   ];
   return (
     <div className="space-y-4">
-      {/* 周期选择 */}
-      <div className="card p-4">
-        <label className="block text-xs font-medium text-gray-500 mb-1.5">
-          当前训练周期
-        </label>
-        <select
-          value={cycleId}
-          onChange={(e) => setCycleId(e.target.value)}
-          className="input-field"
-        >
-          <option value="">选择周期...</option>
-          {cycles.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name} {c.is_active ? "(活跃)" : ""}
-            </option>
-          ))}
-        </select>
+      {/* 周期选择 + 计划选择 */}
+      <div className="card p-4 space-y-2.5">
+        <div>
+          <label className="block text-xs font-medium text-gray-500 mb-1.5">
+            当前训练周期
+          </label>
+          <select
+            value={cycleId}
+            onChange={(e) => setCycleId(e.target.value)}
+            className="input-field"
+          >
+            <option value="">选择周期...</option>
+            {cycles.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name} {c.is_active ? "(活跃)" : ""}
+              </option>
+            ))}
+          </select>
+        </div>
+        {/* 计划选择（可选） */}
+        <div>
+          <label className="block text-xs font-medium text-gray-500 mb-1.5 flex items-center gap-1">
+            <Target className="w-3 h-3" />
+            关联计划（可选，选后可自动匹配动作完成度）
+          </label>
+          <select
+            value={selectedPlanId}
+            onChange={(e) => setSelectedPlanId(e.target.value)}
+            className="input-field"
+          >
+            <option value="">不关联计划（仅记录训练）</option>
+            {plans.map((p) => (
+              <option key={p.id} value={p.id!}>
+                {p.name} ({p.duration_weeks}周·每周{p.workouts_per_week}练)
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
       {/* 输入区域 */}
       <div className="card p-4">
