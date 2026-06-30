@@ -2,11 +2,14 @@
 import { useState, useEffect } from "react";
 import { Send, Loader2, Mic } from "lucide-react";
 import type { Cycle } from "@/types";
+import ExerciseSuggestions from "./ExerciseSuggestions";
 interface WorkoutInputProps {
   onSuccess?: () => void;
 }
 export default function WorkoutInput({ onSuccess }: WorkoutInputProps) {
   const [text, setText] = useState("");
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [lastWord, setLastWord] = useState("");
   const [cycleId, setCycleId] = useState<string>("");
   const [cycles, setCycles] = useState<Cycle[]>([]);
   const [loading, setLoading] = useState(false);
@@ -14,6 +17,13 @@ export default function WorkoutInput({ onSuccess }: WorkoutInputProps) {
     success: boolean;
     message: string;
   } | null>(null);
+  // 检测用户当前输入的关键词（最后一个词）
+  const updateLastWord = (val: string) => {
+    const words = val.split(/[\s,，。、]+/);
+    const last = words[words.length - 1] || "";
+    setLastWord(last);
+    setShowSuggestions(last.length >= 1 && !val.endsWith("kg") && !val.endsWith("组") && !val.endsWith("次"));
+  };
   // 加载活跃周期
   useEffect(() => {
     fetch("/api/cycles")
@@ -41,6 +51,7 @@ export default function WorkoutInput({ onSuccess }: WorkoutInputProps) {
       if (data.success) {
         setResult({ success: true, message: "训练记录已保存！" });
         setText("");
+        setShowSuggestions(false);
         onSuccess?.();
       } else {
         setResult({ success: false, message: data.error || "保存失败" });
@@ -50,6 +61,13 @@ export default function WorkoutInput({ onSuccess }: WorkoutInputProps) {
     } finally {
       setLoading(false);
     }
+  };
+  const selectSuggestion = (name: string) => {
+    // 替换最后一个词为选中的动作名
+    const words = text.split(/[\s,，。、]+/);
+    words[words.length - 1] = name;
+    setText(words.join("") + " ");
+    setShowSuggestions(false);
   };
   const examples = [
     "平板卧推70kg 4组8次，最后一组吃力",
@@ -81,13 +99,21 @@ export default function WorkoutInput({ onSuccess }: WorkoutInputProps) {
         <label className="block text-sm font-medium text-gray-700 mb-2">
           口语记录训练
         </label>
-        <textarea
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          placeholder="用口语描述你的训练内容..."
-          className="input-field min-h-[120px] resize-none"
-          rows={4}
-        />
+        <div className="relative">
+          <textarea
+            value={text}
+            onChange={(e) => { setText(e.target.value); updateLastWord(e.target.value); }}
+            placeholder="输入动作名查看 AI 推荐..."
+            className="input-field min-h-[120px] resize-none"
+            rows={4}
+          />
+          <ExerciseSuggestions
+            searchText={lastWord}
+            onSelect={selectSuggestion}
+            visible={showSuggestions && lastWord.length >= 1}
+            onClose={() => setShowSuggestions(false)}
+          />
+        </div>
         <div className="mt-2 flex items-center gap-2">
           <button
             onClick={handleSubmit}

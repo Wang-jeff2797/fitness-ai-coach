@@ -1,15 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabaseClient, getServerUser } from "@/lib/supabase/server";
-import { callDeepSeekJSON } from "@/lib/ai/deepseek";
+import { callDeepSeek } from "@/lib/ai/deepseek";
 import { buildGeneratePlanPrompt } from "@/lib/ai/prompts";
 import { calculateTDEE, getCalorieTarget } from "@/lib/analytics/tdee";
 import { estimateCaloriesByMet } from "@/lib/analytics/met-calories";
 import type {
   CyclePlan, PlanDay, PlanExercise, GeneratePlanRequest,
 } from "@/types";
-
 export const dynamic = 'force-dynamic';
-
 function validatePlanLocally(plan: CyclePlan): CyclePlan {
   if (!plan.days || plan.days.length === 0) plan.days = [];
   const usedDays = new Set<number>();
@@ -42,7 +40,6 @@ function validatePlanLocally(plan: CyclePlan): CyclePlan {
   plan.days = orderedDays;
   return plan;
 }
-
 // ========= GET: 列出计划 或 单个计划详情（含 days + exercises）=========
 export async function GET(request: NextRequest) {
   try {
@@ -59,6 +56,8 @@ export async function GET(request: NextRequest) {
         .from("plan_days").select("*").eq("plan_id", planId).order("order_index", { ascending: true });
       const { data: exercises } = await supabase
         .from("plan_exercises").select("*").eq("plan_id", planId).order("order_index", { ascending: true });
+      console.log("=== GET plan detail ===", { dayCount: days?.length || 0, exCount: exercises?.length || 0 });
+      console.log("exercises sample:", JSON.stringify(exercises?.slice(0, 2) || []).slice(0, 200));
       const dayMap = new Map<string, PlanDay>();
       for (const d of days || []) dayMap.set(d.id, { ...d, exercises: [] });
       for (const ex of exercises || []) {
@@ -78,7 +77,6 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "服务器错误" }, { status: 500 });
   }
 }
-
 // ========= POST: 1) 生成计划 AI  或 2) 直接保存 =========
 export async function POST(request: NextRequest) {
   try {
@@ -86,7 +84,6 @@ export async function POST(request: NextRequest) {
     if (!user) return NextResponse.json({ error: "未登录" }, { status: 401 });
     const supabase = await createServerSupabaseClient();
     const body = await request.json() as GeneratePlanRequest | (CyclePlan & { save_directly?: boolean });
-
     // --- 直接保存（用户编辑后的计划）---
     if ((body as any).save_directly) {
       const planData = body as CyclePlan & { save_directly?: boolean };
@@ -104,7 +101,6 @@ export async function POST(request: NextRequest) {
           notes: validated.notes || null,
         }).select().single();
       if (pErr || !plan) return NextResponse.json({ error: "创建计划失败" }, { status: 500 });
-
       // 保存 days
       for (const day of validated.days || []) {
         const { data: savedDay, error: dErr } = await supabase
@@ -128,7 +124,7 @@ export async function POST(request: NextRequest) {
             target_sets: ex.target_sets,
             target_reps: ex.target_reps,
             target_weight_kg: ex.target_weight_kg || null,
-            rpe_target: ex.rpe_target || null,
+            rpe_target: ex.rpe_target ? Math.round(ex.rpe_target) : null,
             notes: ex.notes || null,
             order_index: ex.order_index ?? idx,
           }));
@@ -137,13 +133,29 @@ export async function POST(request: NextRequest) {
       }
       return NextResponse.json({ plan_id: plan.id }, { status: 201 });
     }
-
     // --- AI 生成计划（默认模式）---
     const req = body as GeneratePlanRequest;
     // 获取上下文
     const { data: profile } = await supabase.from("users").select("*").eq("id", user.id).maybeSingle();
     const { data: prs } = await supabase.from("personal_records").select("*").eq("user_id", user.id);
-
+    const { data: prefs } = await supabase
+      .from("user_exercise_preferences")
+      .select("*")
+      .eq("user_id", user.id)
+      .gte("weight", 0.3)
+      .order("weight", { ascending: false });
+    // 按肌肉分组偏好动作
+    const prefMap = new Map<string, string[]>();
+    for (const p of prefs || []) {
+      const mg = p.muscle_group;
+      if (!prefMap.has(mg)) prefMap.set(mg, []);
+      const list = prefMap.get(mg)!;
+      if (list.length < 8) list.push(p.exercise_name);
+    }
+    const preferences_context = Array.from(prefMap.entries()).map(([k, v]) => ({
+      muscle_group: k,
+      exercises: v,
+    }));
     const fullReq = {
       ...req,
       pr_context: prs || [],
@@ -155,27 +167,42 @@ export async function POST(request: NextRequest) {
         activity_level: profile?.activity_level || 'moderate',
         training_experience: (profile?.age && profile.age < 25) ? 'beginner' : (prs && prs.length > 8 ? 'advanced' : 'intermediate'),
       },
+      preferences_context,
+      day_keywords: (req as any).day_keywords || undefined,
     };
-
     let planResult: CyclePlan;
     try {
-      planResult = await callDeepSeekJSON<CyclePlan>(
+      // 用纯文本模式（不用 json_object），DeepSeek 的 json_object 模式会省略嵌套数组
+      const raw = await callDeepSeek(
         buildGeneratePlanPrompt(fullReq),
-        "请生成符合目标的训练计划，严格按 JSON Schema 输出。",
-        { temperature: 0.2, maxTokens: 5000 },
+        "请生成训练计划，严格按以上 JSON Schema 输出，每个训练日必须包含具体动作。",
+        { temperature: 0.2, maxTokens: 6000 },
       );
+      // 尝试提取 JSON（可能被 markdown 代码块包裹）
+      let jsonStr = raw.trim();
+      console.log("=== RAW AI RESPONSE (start) ===");
+      console.log(raw);
+      console.log("=== RAW AI RESPONSE (end) ===");
+      const match = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
+      if (match) jsonStr = match[1].trim();
+      planResult = JSON.parse(jsonStr) as CyclePlan;
+      // 确保每个训练日有 exercises（AI 偶尔会遗漏）
+      if (planResult.days) {
+        for (const day of planResult.days) {
+          if (!day.is_rest_day && (!day.exercises || day.exercises.length === 0)) {
+            day.exercises = buildDefaultExercises(planResult.goal || req.goal, day.order_index ?? 0);
+          }
+        }
+      }
     } catch {
       // AI 失败 fallback：本地生成默认模板
       planResult = buildFallbackPlan(req);
     }
-
     planResult.goal = req.goal;
     planResult.duration_weeks = req.duration_weeks;
     planResult.workouts_per_week = req.workouts_per_week;
     planResult.name = req.name || planResult.name || defaultPlanName(req.goal, req.duration_weeks);
-
     const validated = validatePlanLocally(planResult);
-
     // === 保存到 DB ===
     const { data: savedPlan, error: planErr } = await supabase
       .from("cycle_plans").insert({
@@ -188,7 +215,6 @@ export async function POST(request: NextRequest) {
         notes: validated.notes || null,
       }).select().single();
     if (planErr || !savedPlan) return NextResponse.json({ error: "保存计划失败" }, { status: 500 });
-
     for (const day of validated.days || []) {
       const { data: savedDay, error: dErr } = await supabase
         .from("plan_days").insert({
@@ -211,11 +237,12 @@ export async function POST(request: NextRequest) {
           target_sets: ex.target_sets,
           target_reps: ex.target_reps,
           target_weight_kg: ex.target_weight_kg || null,
-          rpe_target: ex.rpe_target || null,
+          rpe_target: ex.rpe_target ? Math.round(ex.rpe_target) : null,
           notes: ex.notes || null,
           order_index: ex.order_index ?? idx,
         }));
-        await supabase.from("plan_exercises").insert(inserts);
+        const { error: exErr } = await supabase.from("plan_exercises").insert(inserts);
+        if (exErr) console.error("INSERT exercises ERROR:", exErr.message, "for day", day.day_name);
       }
     }
     return NextResponse.json({ plan_id: savedPlan.id, plan: { ...validated, id: savedPlan.id } }, { status: 201 });
@@ -224,7 +251,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "服务器错误" }, { status: 500 });
   }
 }
-
 // ========= PUT: 更新计划（增删改 days / exercises）=========
 export async function PUT(request: NextRequest) {
   try {
@@ -238,11 +264,9 @@ export async function PUT(request: NextRequest) {
       delete_exercises?: string[];
     };
     if (!body.id) return NextResponse.json({ error: "id 缺失" }, { status: 400 });
-
     const { data: existingPlan } = await supabase
       .from("cycle_plans").select("*").eq("id", body.id).eq("user_id", user.id).maybeSingle();
     if (!existingPlan) return NextResponse.json({ error: "计划不存在" }, { status: 404 });
-
     // 更新 plan 基本字段
     const patch: any = {};
     for (const f of ["name", "goal", "duration_weeks", "workouts_per_week", "start_date", "notes", "cycle_id"] as const) {
@@ -252,7 +276,6 @@ export async function PUT(request: NextRequest) {
       patch.updated_at = new Date().toISOString();
       await supabase.from("cycle_plans").update(patch).eq("id", body.id);
     }
-
     // 删除 day / exercise
     if (body.delete_exercises?.length) {
       await supabase.from("plan_exercises").delete()
@@ -288,7 +311,7 @@ export async function PUT(request: NextRequest) {
               target_sets: ex.target_sets,
               target_reps: ex.target_reps,
               target_weight_kg: ex.target_weight_kg ?? null,
-              rpe_target: ex.rpe_target ?? null,
+              rpe_target: ex.rpe_target ? Math.round(ex.rpe_target) : null,
               notes: ex.notes ?? null,
               order_index: ex.order_index ?? idx,
             }));
@@ -309,7 +332,7 @@ export async function PUT(request: NextRequest) {
           target_sets: ex.target_sets,
           target_reps: ex.target_reps,
           target_weight_kg: ex.target_weight_kg ?? null,
-          rpe_target: ex.rpe_target ?? null,
+          rpe_target: ex.rpe_target ? Math.round(ex.rpe_target) : null,
           notes: ex.notes ?? null,
           order_index: ex.order_index,
         };
@@ -326,7 +349,6 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: "服务器错误" }, { status: 500 });
   }
 }
-
 // ========= DELETE =========
 export async function DELETE(request: NextRequest) {
   try {
@@ -343,9 +365,7 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ error: "服务器错误" }, { status: 500 });
   }
 }
-
 // ===================== 工具函数 =====================
-
 function defaultPlanName(goal: string, weeks: number): string {
   const n: Record<string, string> = {
     muscle_gain: `${weeks}周增肌周期`,
@@ -355,7 +375,6 @@ function defaultPlanName(goal: string, weeks: number): string {
   };
   return n[goal] || `${weeks}周训练周期`;
 }
-
 function buildFallbackPlan(req: GeneratePlanRequest): CyclePlan {
   const dowDays = [1, 3, 5].slice(0, Math.min(req.workouts_per_week, 6));
   while (dowDays.length < Math.min(req.workouts_per_week, 6)) {
@@ -368,7 +387,6 @@ function buildFallbackPlan(req: GeneratePlanRequest): CyclePlan {
     endurance: ["稳态有氧LSD", "力量维持A", "间歇训练HIIT", "力量维持B", "节奏跑/节奏骑", "长距离有氧"],
   };
   const splits = defaultSplits[req.goal] || defaultSplits.muscle_gain;
-
   const days: PlanDay[] = dowDays.map((dow, idx) => ({
     day_of_week: dow,
     day_name: `Day ${String.fromCharCode(65 + idx)} - ${splits[idx] || "综合训练日"}`,
@@ -377,7 +395,6 @@ function buildFallbackPlan(req: GeneratePlanRequest): CyclePlan {
     order_index: idx,
     exercises: buildDefaultExercises(req.goal, idx),
   }));
-
   return {
     name: defaultPlanName(req.goal, req.duration_weeks),
     goal: req.goal,
@@ -388,7 +405,6 @@ function buildFallbackPlan(req: GeneratePlanRequest): CyclePlan {
     days,
   };
 }
-
 function buildDefaultExercises(goal: string, splitIdx: number): PlanExercise[] {
   const presets: Record<string, PlanExercise[][]> = {
     muscle_gain: [

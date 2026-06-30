@@ -120,6 +120,8 @@ export interface PersonalRecord {
   estimated_1rm: number;
   record_date: string;
   notes?: string;
+  /** 系统自动从训练数据计算出的 1RM（隐藏权重） */
+  calculated_1rm?: number | null;
 }
 // --- 数据库行类型 ---
 export interface User {
@@ -310,6 +312,8 @@ export interface GeneratePlanRequest {
   duration_weeks: number;
   workouts_per_week: number;
   name?: string;
+  day_keywords?: string[];
+  preferences_context?: { muscle_group: string; exercises: string[] }[];
   pr_context?: PersonalRecord[];
   profile_context?: {
     age: number;
@@ -338,4 +342,30 @@ export interface TodayDashboard {
     tdee_adjusted: number | null;
     plan: CyclePlan | null;
   } | null;
+}
+// --- 肌肉群常量 ---
+export type MuscleGroup =
+  | "chest" | "back" | "shoulders" | "legs" | "arms" | "core" | "cardio" | "full_body";
+// --- 动作偏好 ---
+export interface UserExercisePreference {
+  id?: string;
+  user_id?: string;
+  muscle_group: MuscleGroup;
+  exercise_name: string;
+  exercise_type: ExerciseType;
+  weight: number;
+  usage_count: number;
+  is_favorite: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+// --- 推荐动作（含上下文）---
+export interface ExerciseRecommendation {
+  exercise_name: string;
+  exercise_type: ExerciseType;
+  muscle_group: MuscleGroup;
+  weight: number;
+  usage_count: number;
+  is_favorite: boolean;
+  reason?: string;
 }

@@ -1,5 +1,4 @@
 "use client";
-
 import { useState, useEffect } from "react";
 import {
   User,
@@ -7,6 +6,7 @@ import {
   Settings2,
   Trophy,
   HelpCircle,
+  Star,
   Loader2,
   Save,
   Plus,
@@ -14,29 +14,25 @@ import {
   Brain,
   CheckCircle2,
 } from "lucide-react";
-
-type ProfileTab = "info" | "lifestyle" | "settings" | "pr" | "unknown";
-
+import ExercisePreferencesPanel from "./ExercisePreferencesPanel";
+type ProfileTab = "info" | "lifestyle" | "settings" | "pr" | "unknown" | "preferences";
 export default function ProfilePage() {
   const [activeTab, setActiveTab] = useState<ProfileTab>("info");
   const [cycles, setCycles] = useState<any[]>([]);
-
   const tabs: { id: ProfileTab; label: string; icon: any }[] = [
     { id: "info", label: "个人信息", icon: User },
+    { id: "preferences", label: "常用动作", icon: Star },
     { id: "lifestyle", label: "生活反馈", icon: Activity },
     { id: "settings", label: "训练设置", icon: Settings2 },
     { id: "pr", label: "个人纪录", icon: Trophy },
     { id: "unknown", label: "未知动作", icon: HelpCircle },
   ];
-
   useEffect(() => {
     fetch("/api/cycles").then(r => r.json()).then(d => {
       if (d.cycles) setCycles(d.cycles);
     }).catch(() => {});
   }, []);
-
   const activeCycle = cycles.find((c: any) => c.is_active);
-
   return (
     <div className="space-y-4">
       {/* 子标签导航 */}
@@ -60,16 +56,19 @@ export default function ProfilePage() {
           );
         })}
       </div>
-
       {activeTab === "info" && <ProfileInfoForm />}
       {activeTab === "lifestyle" && <LifestyleFeedbackForm activeCycle={activeCycle} />}
       {activeTab === "settings" && <UserSettingsForm />}
       {activeTab === "pr" && <PersonalRecordsForm />}
       {activeTab === "unknown" && <UnknownActionsForm />}
+      {activeTab === "preferences" && (
+        <div className="card p-4">
+          <ExercisePreferencesPanel />
+        </div>
+      )}
     </div>
   );
 }
-
 // ============================================================
 // 1. 个人信息表单
 // ============================================================
@@ -83,7 +82,6 @@ function ProfileInfoForm() {
     weight_kg: 70, height_cm: 175,
     activity_level: "moderate", goal: "muscle_gain",
   });
-
   useEffect(() => {
     fetch("/api/profile").then(r => r.json()).then(d => {
       if (d.profile) {
@@ -100,7 +98,6 @@ function ProfileInfoForm() {
       }
     }).catch(() => {}).finally(() => setLoading(false));
   }, []);
-
   const handleSave = async () => {
     setSaving(true);
     setSaved(false);
@@ -116,9 +113,7 @@ function ProfileInfoForm() {
       setSaving(false);
     }
   };
-
   if (loading) return <div className="text-center py-8 text-gray-400 text-sm">加载中...</div>;
-
   return (
     <div className="card p-4 space-y-4">
       <div className="flex items-center gap-2">
@@ -126,7 +121,6 @@ function ProfileInfoForm() {
         <h3 className="font-semibold text-gray-900">个人资料</h3>
       </div>
       <p className="text-xs text-gray-400 -mt-2">用于 TDEE 计算和个性化训练建议</p>
-
       <div className="grid grid-cols-2 gap-3">
         <div>
           <label className="block text-xs font-medium text-gray-500 mb-1">姓名</label>
@@ -167,7 +161,6 @@ function ProfileInfoForm() {
           </select>
         </div>
       </div>
-
       <div>
         <label className="block text-xs font-medium text-gray-500 mb-1">训练目标</label>
         <div className="grid grid-cols-2 gap-2">
@@ -190,7 +183,6 @@ function ProfileInfoForm() {
           ))}
         </div>
       </div>
-
       <button onClick={handleSave} disabled={saving} className="btn-primary w-full justify-center">
         {saving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
         {saving ? "保存中..." : "保存"}
@@ -199,7 +191,6 @@ function ProfileInfoForm() {
     </div>
   );
 }
-
 // ============================================================
 // 2. 生活反馈表单
 // ============================================================
@@ -212,7 +203,6 @@ function LifestyleFeedbackForm({ activeCycle }: { activeCycle: any }) {
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState<any>(null);
   const [feedbackExists, setFeedbackExists] = useState(false);
-
   useEffect(() => {
     if (activeCycle) {
       fetch(`/api/lifestyle-feedback?cycle_id=${activeCycle.id}`).then(r => r.json()).then(d => {
@@ -220,7 +210,6 @@ function LifestyleFeedbackForm({ activeCycle }: { activeCycle: any }) {
       }).catch(() => {});
     }
   }, [activeCycle]);
-
   const handleSubmit = async () => {
     if (!activeCycle) return;
     setSaving(true);
@@ -239,11 +228,9 @@ function LifestyleFeedbackForm({ activeCycle }: { activeCycle: any }) {
       setSaving(false);
     }
   };
-
   if (!activeCycle) {
     return <div className="card p-4 text-center text-gray-400 text-sm">请先创建一个活跃周期</div>;
   }
-
   return (
     <div className="card p-4 space-y-4">
       <div className="flex items-center gap-2">
@@ -251,14 +238,12 @@ function LifestyleFeedbackForm({ activeCycle }: { activeCycle: any }) {
         <h3 className="font-semibold text-gray-900">生活反馈</h3>
       </div>
       <p className="text-xs text-gray-400 -mt-2">周期开始时的身体状态，用于修正 TDEE</p>
-
       {feedbackExists && !result && (
         <div className="bg-green-50 text-green-700 text-xs px-3 py-2 rounded-xl flex items-center gap-1.5">
           <CheckCircle2 className="w-3.5 h-3.5" />
           本周期已填写反馈
         </div>
       )}
-
       <div>
         <label className="block text-xs font-medium text-gray-500 mb-1.5">睡眠质量</label>
         <div className="flex gap-2">
@@ -273,7 +258,6 @@ function LifestyleFeedbackForm({ activeCycle }: { activeCycle: any }) {
         </div>
         <p className="text-[10px] text-gray-400 mt-1">1=极差, 5=极好</p>
       </div>
-
       <div>
         <label className="block text-xs font-medium text-gray-500 mb-1.5">压力水平</label>
         <div className="flex gap-2">
@@ -288,7 +272,6 @@ function LifestyleFeedbackForm({ activeCycle }: { activeCycle: any }) {
         </div>
         <p className="text-[10px] text-gray-400 mt-1">1=无压力, 5=极大压力</p>
       </div>
-
       <div>
         <label className="block text-xs font-medium text-gray-500 mb-1.5">日常活动变化</label>
         <div className="grid grid-cols-3 gap-2">
@@ -306,7 +289,6 @@ function LifestyleFeedbackForm({ activeCycle }: { activeCycle: any }) {
           ))}
         </div>
       </div>
-
       <div>
         <label className="block text-xs font-medium text-gray-500 mb-1.5">特殊情况</label>
         <div className="grid grid-cols-3 gap-2">
@@ -324,12 +306,10 @@ function LifestyleFeedbackForm({ activeCycle }: { activeCycle: any }) {
           ))}
         </div>
       </div>
-
       <button onClick={handleSubmit} disabled={saving} className="btn-primary w-full justify-center">
         {saving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
         {saving ? "计算中..." : "提交反馈"}
       </button>
-
       {result && result.bmr && (
         <div className="bg-primary-50 rounded-xl p-3 space-y-1">
           <p className="text-xs font-semibold text-primary-700">TDEE 计算结果</p>
@@ -346,7 +326,6 @@ function LifestyleFeedbackForm({ activeCycle }: { activeCycle: any }) {
     </div>
   );
 }
-
 // ============================================================
 // 3. 用户设置 (key-value)
 // ============================================================
@@ -355,15 +334,12 @@ function UserSettingsForm() {
   const [newKey, setNewKey] = useState("");
   const [newValue, setNewValue] = useState("");
   const [loading, setLoading] = useState(true);
-
   const loadSettings = () => {
     fetch("/api/user-settings").then(r => r.json()).then(d => {
       if (d.settings) setSettings(d.settings);
     }).catch(() => {}).finally(() => setLoading(false));
   };
-
   useEffect(() => { loadSettings(); }, []);
-
   const addSetting = async () => {
     if (!newKey.trim() || !newValue.trim()) return;
     const res = await fetch("/api/user-settings", {
@@ -376,14 +352,11 @@ function UserSettingsForm() {
       loadSettings();
     }
   };
-
   const deleteSetting = async (key: string) => {
     await fetch(`/api/user-settings?key=${encodeURIComponent(key)}`, { method: "DELETE" });
     loadSettings();
   };
-
   if (loading) return <div className="text-center py-8 text-gray-400 text-sm">加载中...</div>;
-
   return (
     <div className="card p-4 space-y-4">
       <div className="flex items-center gap-2">
@@ -393,7 +366,6 @@ function UserSettingsForm() {
       <p className="text-xs text-gray-400 -mt-2">
         自定义常用变量，作为 AI 提取时的上下文。例如：组间休息时间、常用器械重量
       </p>
-
       {/* 预设建议 */}
       <div className="flex flex-wrap gap-1.5">
         {["组间休息:90秒", "常用配速:5:00/km", "热身组:空杆", "游泳配速:2:00/100m"].map(preset => (
@@ -405,7 +377,6 @@ function UserSettingsForm() {
           </button>
         ))}
       </div>
-
       {/* 添加新设置 */}
       <div className="flex gap-2">
         <input value={newKey} onChange={e => setNewKey(e.target.value)}
@@ -416,7 +387,6 @@ function UserSettingsForm() {
           <Plus className="w-4 h-4" />
         </button>
       </div>
-
       {/* 设置列表 */}
       {settings.length === 0 ? (
         <p className="text-xs text-gray-400 text-center py-4">还没有自定义设置</p>
@@ -438,7 +408,6 @@ function UserSettingsForm() {
     </div>
   );
 }
-
 // ============================================================
 // 4. 个人纪录 (PR)
 // ============================================================
@@ -447,15 +416,12 @@ function PersonalRecordsForm() {
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ exercise: "", weight_kg: 0, reps: 0, notes: "" });
-
   const loadRecords = () => {
     fetch("/api/personal-record").then(r => r.json()).then(d => {
       if (d.records) setRecords(d.records);
     }).catch(() => {}).finally(() => setLoading(false));
   };
-
   useEffect(() => { loadRecords(); }, []);
-
   const addRecord = async () => {
     if (!form.exercise || !form.weight_kg || !form.reps) return;
     const res = await fetch("/api/personal-record", {
@@ -469,14 +435,11 @@ function PersonalRecordsForm() {
       loadRecords();
     }
   };
-
   const deleteRecord = async (id: string) => {
     await fetch(`/api/personal-record?id=${id}`, { method: "DELETE" });
     loadRecords();
   };
-
   if (loading) return <div className="text-center py-8 text-gray-400 text-sm">加载中...</div>;
-
   return (
     <div className="card p-4 space-y-4">
       <div className="flex items-center justify-between">
@@ -489,7 +452,6 @@ function PersonalRecordsForm() {
           添加
         </button>
       </div>
-
       {showForm && (
         <div className="bg-gray-50 rounded-xl p-3 space-y-2">
           <input value={form.exercise} onChange={e => setForm({...form, exercise: e.target.value})}
@@ -506,7 +468,6 @@ function PersonalRecordsForm() {
           </div>
         </div>
       )}
-
       {records.length === 0 ? (
         <p className="text-xs text-gray-400 text-center py-4">暂无纪录</p>
       ) : (
@@ -530,7 +491,6 @@ function PersonalRecordsForm() {
     </div>
   );
 }
-
 // ============================================================
 // 5. 未知动作
 // ============================================================
@@ -539,15 +499,12 @@ function UnknownActionsForm() {
   const [loading, setLoading] = useState(true);
   const [learning, setLearning] = useState<string | null>(null);
   const [learnResult, setLearnResult] = useState<string | null>(null);
-
   const loadActions = () => {
     fetch("/api/learn-action").then(r => r.json()).then(d => {
       if (d.actions) setActions(d.actions.filter((a: any) => !a.is_learned));
     }).catch(() => {}).finally(() => setLoading(false));
   };
-
   useEffect(() => { loadActions(); }, []);
-
   const learnAction = async (name: string) => {
     setLearning(name);
     setLearnResult(null);
@@ -566,7 +523,6 @@ function UnknownActionsForm() {
       setLearning(null);
     }
   };
-
   return (
     <div className="card p-4 space-y-4">
       <div className="flex items-center gap-2">
@@ -576,13 +532,11 @@ function UnknownActionsForm() {
       <p className="text-xs text-gray-400 -mt-2">
         AI 提取时未在 MET 库中找到的动作，可以逐个学习
       </p>
-
       {learnResult && (
         <div className="bg-green-50 text-green-700 text-xs px-3 py-2 rounded-xl flex items-center gap-1.5">
           <CheckCircle2 className="w-3.5 h-3.5" />{learnResult}
         </div>
       )}
-
       {loading ? (
         <div className="text-center py-8 text-gray-400 text-sm">加载中...</div>
       ) : actions.length === 0 ? (

@@ -3,6 +3,7 @@ import { createServerSupabaseClient, getServerUser } from "@/lib/supabase/server
 import { callDeepSeekJSON } from "@/lib/ai/deepseek";
 import { EXTRACT_WORKOUT_SYSTEM_PROMPT } from "@/lib/ai/prompts";
 import { findMetMatch, estimateSessionCalories } from "@/lib/analytics/met-calories";
+import { best1RMFromExercises } from "@/lib/analytics/auto-pr";
 import type { SessionData, ExtractWorkoutRequest, ExtractWorkoutResponse } from "@/types";
 export const dynamic = 'force-dynamic';
 export async function POST(request: NextRequest) {
@@ -120,6 +121,43 @@ export async function POST(request: NextRequest) {
         { success: false, error: "存储失败" },
         { status: 500 }
       );
+    }
+    // === 自动更新个人纪录（计算 1RM）===
+    const prMap = best1RMFromExercises(sessionData.exercises || []);
+    if (prMap.size > 0) {
+      const prEntries = Array.from(prMap);
+      for (let i = 0; i < prEntries.length; i++) {
+        const [exercise, calc1rm] = prEntries[i];
+        // 检查是否已有该动作的纪录
+        const { data: existing } = await supabase
+          .from("personal_records")
+          .select("id, estimated_1rm, calculated_1rm")
+          .eq("user_id", user.id)
+          .eq("exercise", exercise)
+          .maybeSingle();
+        if (existing) {
+          // 已有纪录：只更新 calculated_1rm（如果新值更大），不碰 estimated_1rm
+          if (calc1rm > (existing.calculated_1rm || 0)) {
+            await supabase
+              .from("personal_records")
+              .update({ calculated_1rm: calc1rm })
+              .eq("id", existing.id);
+          }
+        } else {
+          // 无纪录：自动创建，estimated_1rm = calculated_1rm（用户可后期修改）
+          await supabase
+            .from("personal_records")
+            .insert({
+              user_id: user.id,
+              exercise,
+              weight_kg: 0,
+              reps: 0,
+              estimated_1rm: calc1rm,
+              calculated_1rm: calc1rm,
+              record_date: new Date().toISOString().slice(0, 10),
+            });
+        }
+      }
     }
     return NextResponse.json<ExtractWorkoutResponse>(
       { success: true, workout },

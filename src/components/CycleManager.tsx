@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Plus, Loader2, CheckCircle2, AlertCircle, Brain,
   ChevronLeft, Trash2, Edit3, Save, Target,
@@ -8,6 +8,8 @@ import {
 import type {
   Cycle, CyclePlan, PlanDay, PlanExercise, UserGoal, CycleAdjustment,
 } from "@/types";
+import { COMMON_DAY_KEYWORDS, INTENSITY_COLORS, calcDayIntensity, calcTotalVolume, calcIntensityLevel, normalizeExerciseName } from "@/lib/exercise-utils";
+import { MUSCLE_GROUPS } from "@/lib/exercise-library";
 interface CycleManagerProps {
   onRefresh?: () => void;
 }
@@ -42,6 +44,19 @@ export default function CycleManager({ onRefresh }: CycleManagerProps) {
   const [wizName, setWizName] = useState("");
   const [wizGenerating, setWizGenerating] = useState(false);
   const [wizResultPlanId, setWizResultPlanId] = useState<string | null>(null);
+  // 每日肌群关键字（wizPerWeek 长度的数组）
+  const [wizDayKeywords, setWizDayKeywords] = useState<string[]>(["push", "pull", "legs"]);
+  // 当 wizPerWeek 变化时同步 wizDayKeywords 长度
+  useEffect(() => {
+    setWizDayKeywords(prev => {
+      if (prev.length === wizPerWeek) return prev;
+      if (prev.length < wizPerWeek) {
+        const defaults = ["push", "pull", "legs", "push", "upper", "full_body"];
+        return [...prev, ...defaults.slice(prev.length, wizPerWeek)];
+      }
+      return prev.slice(0, wizPerWeek);
+    });
+  }, [wizPerWeek]);
   const { colorMap } = useGoals();
   const loadAll = () => {
     setLoading(true);
@@ -71,6 +86,7 @@ export default function CycleManager({ onRefresh }: CycleManagerProps) {
           duration_weeks: wizWeeks,
           workouts_per_week: wizPerWeek,
           name: wizName.trim() || undefined,
+          day_keywords: wizDayKeywords,
         }),
       });
       const d = await res.json();
@@ -225,6 +241,37 @@ export default function CycleManager({ onRefresh }: CycleManagerProps) {
                       : "bg-gray-50 text-gray-600 hover:bg-gray-100"
                   }`}
                 >{n} 天</button>
+              ))}
+            </div>
+          </div>
+          {/* 每日肌群分配 */}
+          <div>
+            <label className="text-xs font-medium text-gray-600 mb-1.5 block">
+              每个训练日主要肌群：
+            </label>
+            <div className="space-y-2">
+              {Array.from({ length: wizPerWeek }).map((_, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <span className="text-[11px] text-gray-400 w-10 shrink-0">日{i + 1}</span>
+                  <div className="flex gap-1 overflow-x-auto pb-1 scrollbar-hide">
+                    {COMMON_DAY_KEYWORDS.map(kw => (
+                      <button key={kw.key} onClick={() => {
+                        const next = [...wizDayKeywords];
+                        next[i] = kw.key;
+                        setWizDayKeywords(next);
+                      }}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-medium whitespace-nowrap transition-colors ${
+                          wizDayKeywords[i] === kw.key
+                            ? kw.key === "rest"
+                              ? "bg-gray-200 text-gray-500"
+                              : "bg-primary-100 text-primary-700"
+                            : "bg-gray-50 text-gray-500 hover:bg-gray-100"
+                        }`}>
+                        {kw.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               ))}
             </div>
           </div>
@@ -512,25 +559,31 @@ function PlanEditor({
     }
     setSaving(true);
     try {
-      // 先保存 plan 基础字段
-      await fetch("/api/cycle-plans", {
+      // 发送完整 diff 到 PUT API
+      // 新天（无id）的 exercises 嵌入到 day 里；现有天的 exercises 走 upsert_exercises
+      const localDayById = new Map((local.days || []).map(d => [d.id || d.order_index + "__", d]));
+      const body: any = {
+        id: local.id,
+        name: local.name,
+        goal: local.goal,
+        duration_weeks: local.duration_weeks,
+        workouts_per_week: local.workouts_per_week,
+        start_date: local.start_date,
+        notes: local.notes,
+        upsert_days: upsert_days.map(d => ({
+          ...d,
+          exercises: !d.id ? (localDayById.get(d.order_index + "__")?.exercises || []) : undefined,
+        })),
+        delete_days,
+        upsert_exercises: upsert_exercises.filter(ex => ex.day_id && ex.day_id !== "__TMP_DAY__"),
+        delete_exercises,
+      };
+      const res = await fetch("/api/cycle-plans", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          id: local.id,
-          name: local.name,
-          goal: local.goal,
-          duration_weeks: local.duration_weeks,
-          workouts_per_week: local.workouts_per_week,
-          start_date: local.start_date,
-          notes: local.notes,
-          // 先 upsert days 再处理 exercises
-        }),
+        body: JSON.stringify(body),
       });
-      // 简化处理：先保存天 -> 拿到新 day id -> 再保存 exercise（对于新加的天要找新id）
-      // 为了简化：对"新建的天"我们单独调用 PUT，确保顺序
-      // 由于时间有限，这里采用简化策略：保存除了 exercise 外其他能保存的，然后重载详情
-      // （当前代码已在上面发送请求，但实际上要保证新 day 的新 exercise 要填 day_id。这里做个更健壮的方案）
+      if (!res.ok) throw new Error("保存失败");
       // 重载
       onUpdated();
       setEditing(false);
@@ -687,6 +740,18 @@ function PlanEditor({
               {local.tdee_adjusted} kcal
             </span>
           )}
+          {(() => {
+            const allExs = (local.days || []).flatMap(d => d.exercises || []);
+            const totalVol = calcTotalVolume(allExs);
+            const avgIntensity = calcDayIntensity(allExs);
+            const avgLabel = avgIntensity === "easy" ? "轻松" : avgIntensity === "normal" ? "中等" : "高";
+            return totalVol > 0 ? (
+              <span className="text-[10px] text-gray-500">
+                <Dumbbell className="w-2.5 h-2.5 inline mr-0.5" />
+                总容量 {(totalVol / 1000).toFixed(1)}k · 强度 {avgLabel}
+              </span>
+            ) : null;
+          })()}
         </div>
         {local.notes && !editing && (
           <p className="text-[11px] text-gray-500 mt-2">{local.notes}</p>
@@ -778,8 +843,11 @@ function DayCard({
 }) {
   const exCount = (day.exercises || []).length;
   const totalSets = (day.exercises || []).reduce((s, e) => s + (e.target_sets || 0), 0);
+  const intensityLevel = day.is_rest_day ? "easy" : calcDayIntensity(day.exercises || []);
+  const icolors = INTENSITY_COLORS[intensityLevel];
+  const dayVolume = calcTotalVolume(day.exercises || []);
   return (
-    <div className={`card overflow-hidden ${day.is_rest_day ? "bg-gradient-to-br from-green-50/70 to-white" : ""}`}>
+    <div className={`card overflow-hidden border-l-4 ${icolors.border} ${day.is_rest_day ? "bg-gradient-to-br from-green-50/70 to-white" : icolors.bg}`}>
       {/* Day Header */}
       <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
         <div className="flex-1 min-w-0">
@@ -792,9 +860,19 @@ function DayCard({
                 休息日
               </span>
             ) : (
-              <span className="text-[10px] text-gray-400">
-                {exCount}动作 · {totalSets}组
-              </span>
+              <>
+                <span className="text-[10px] text-gray-400">
+                  {exCount}动作 · {totalSets}组
+                </span>
+                <span className={`px-1.5 py-0.5 text-[9px] font-semibold rounded-full ${icolors.badge}`}>
+                  {intensityLevel === "easy" ? "轻松" : intensityLevel === "normal" ? "中等" : "困难"}
+                </span>
+                {dayVolume > 0 && (
+                  <span className="text-[9px] text-gray-400">
+                    {(dayVolume / 1000).toFixed(1)}k vol
+                  </span>
+                )}
+              </>
             )}
           </div>
           {editing ? (
@@ -879,9 +957,11 @@ function DayCard({
   );
 }
 function ExerciseRowView({ ex, idx }: { ex: PlanExercise; idx: number }) {
+  const intensityLevel = calcIntensityLevel(ex.target_sets, ex.target_reps, ex.target_weight_kg, ex.rpe_target);
+  const colors = INTENSITY_COLORS[intensityLevel];
   return (
-    <div className="flex items-center gap-2 p-2 rounded-xl bg-white border border-gray-100">
-      <div className="w-6 h-6 rounded-lg bg-primary-50 text-primary-600 flex items-center justify-center text-[10px] font-bold shrink-0">
+    <div className={`flex items-center gap-2 p-2 rounded-xl bg-white border ${colors.border}`}>
+      <div className={`w-6 h-6 rounded-lg ${colors.badge} flex items-center justify-center text-[10px] font-bold shrink-0`}>
         {idx + 1}
       </div>
       <div className="flex-1 min-w-0">
@@ -907,16 +987,45 @@ function ExerciseRowEdit({
   onChange: (patch: Partial<PlanExercise>) => void;
   onRemove: () => void;
 }) {
+  const [showSearch, setShowSearch] = useState(false);
+  const searchRef = useRef<HTMLDivElement>(null);
+  // 获取所有动作名
+  const allNames = Object.values(MUSCLE_GROUPS).flatMap(g => g.exercises.map(e => e.name));
+  const [search, setSearch] = useState(ex.exercise_name);
+  useEffect(() => { setSearch(ex.exercise_name); }, [ex.exercise_name]);
+  const matches = search.trim().length >= 1
+    ? allNames.filter(n => n.includes(search.trim())).slice(0, 10)
+    : [];
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (searchRef.current && !searchRef.current.contains(e.target as Node)) setShowSearch(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
   return (
     <div className="p-2 rounded-xl bg-gray-50 border border-gray-200 space-y-1.5">
-      <div className="flex items-center gap-1.5">
+      <div className="flex items-center gap-1.5 relative" ref={searchRef}>
         <span className="text-[10px] font-bold text-gray-500 w-5">#{idx + 1}</span>
         <input
-          value={ex.exercise_name}
-          onChange={e => onChange({ exercise_name: e.target.value })}
+          value={search}
+          onChange={e => { setSearch(e.target.value); setShowSearch(true); onChange({ exercise_name: e.target.value }); }}
+          onFocus={() => setShowSearch(true)}
           className="input-field text-xs flex-1 py-1.5"
-          placeholder="动作名，如：平板卧推"
+          placeholder="输入搜索常用动作..."
         />
+        {/* 搜索结果下拉 - 置于顶层 */}
+        {showSearch && matches.length > 0 && (
+          <div className="absolute left-7 top-0 z-50 mt-8 w-64 bg-white border border-gray-200 rounded-xl shadow-xl max-h-56 overflow-y-auto">
+            {matches.map(n => (
+              <button key={n} type="button"
+                onClick={() => { setSearch(n); onChange({ exercise_name: n, exercise_type: "other" as const }); setShowSearch(false); }}
+                className="w-full text-left px-3 py-2.5 text-[12px] text-gray-700 hover:bg-primary-50 hover:text-primary-700 transition-colors border-b border-gray-50 last:border-0">
+                {n}
+              </button>
+            ))}
+          </div>
+        )}
         <button onClick={onRemove}
           className="p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors">
           <Trash2 className="w-3.5 h-3.5" />

@@ -1,7 +1,7 @@
 // ============================================================
 // 健身 AI 系统提示模板
 // ============================================================
-
+import { MUSCLE_KEYWORDS } from "@/lib/exercise-utils";
 /**
  * 训练口语提取为结构化 JSON 的系统提示
  *
@@ -13,9 +13,7 @@
  * - 训练感受
  */
 export const EXTRACT_WORKOUT_SYSTEM_PROMPT = `你是一位专业的健身教练 AI，擅长将用户的口语化训练记录转化为结构化的运动科学数据。
-
 你的任务：将用户的口语训练描述解析为 JSON，只输出 JSON，不要包含任何其他文字。
-
 ## RPE 量表 (感知 exertion 等级 1-10)
 - 1-2: 非常轻松，几乎不费力
 - 3-4: 轻松，可以轻松交谈
@@ -24,7 +22,6 @@ export const EXTRACT_WORKOUT_SYSTEM_PROMPT = `你是一位专业的健身教练 
 - 8: 非常吃力，只能说几个词
 - 9: 极其吃力，接近极限
 - 10: 极限，无法再多做一次
-
 ## 输出 JSON Schema
 {
   "exercises": [
@@ -63,7 +60,6 @@ export const EXTRACT_WORKOUT_SYSTEM_PROMPT = `你是一位专业的健身教练 
   "felt": "发力感良好" 或 "最后一组吃力" 等用户感受,
   "notes": "其他补充"
 }
-
 ## 转换规则
 1. "组数×次数" 格式转换成多个 set 对象 (set_number 从 1 开始)
 2. 根据描述推断 RPE：如"吃力"≈7，"极限"≈10，"轻松"≈4-5
@@ -73,12 +69,10 @@ export const EXTRACT_WORKOUT_SYSTEM_PROMPT = `你是一位专业的健身教练 
 6. total_volume_kg = Σ(weight_kg × reps × sets)，热身组不计入
 7. session_rpe 为整体训练感受的 RPE
 8. exercise_type 从以下枚举选择: bench_press, squat, deadlift, overhead_press, barbell_row, pull_up, dumbbell_fly, leg_press, leg_curl, leg_extension, lateral_raise, bicep_curl, tricep_pushdown, cable_crossover, dumbbell_shoulder_press, face_pull, hip_thrust, calf_raise, plank, push_up, dip, running, swimming, cycling, rowing, jumping_rope, other
-
 ## 规则
 - 只输出 JSON，不要有任何 Markdown 代码块标记或其他文字
 - 如果信息不全，合理推断填充，不要留 null
 - 确保 JSON 合法可解析`;
-
 /**
  * 周期调整方案生成提示
  *
@@ -89,13 +83,10 @@ export function buildAdjustCyclePrompt(
   userFeedback: string
 ): string {
   return `你是一位拥有 15 年经验的运动科学专家和力量训练教练。请基于以下训练周期数据和用户反馈，生成下一周期的训练调整方案。
-
 ## 当前周期摘要
 ${summaryJson}
-
 ## 用户反馈
 ${userFeedback}
-
 ## 输出 JSON Schema
 {
   "summary": {
@@ -140,7 +131,6 @@ ${userFeedback}
     "deload_week": false
   }
 }
-
 ## 调整原则
 1. 渐进超负荷：如果动作的平均 RPE ≤ 7，建议增加重量 2.5-5kg；如果 RPE ≥ 8.5，保持重量或减重
 2. 容量管理：如果总容量趋势为 increasing，保持或微增；decreasing 则考虑减量周
@@ -148,14 +138,11 @@ ${userFeedback}
 4. 用户反馈优先：用户提到疲劳或疼痛时，相应减量
 5. 大周期结构：如果没有 deload 周超过 4 周，建议加入 deload 周
 6. RPE 目标区间：训练组保持在 6-8 RPE 范围
-
 只输出 JSON，不要有任何其他文字，不要 Markdown 代码块。`;
 }
-
 // ============================================================
 // 训练计划生成（不同目标 → 不同训练体系）
 // ============================================================
-
 const GOAL_TRAINING_PRINCIPLES = {
   muscle_gain: {
     title: "肌肥大（增肌）",
@@ -194,13 +181,14 @@ const GOAL_TRAINING_PRINCIPLES = {
     exercises_per_day: "力量动作 3-4 个（循环），有氧按计划单独安排或结合",
   },
 } as const;
-
 export function buildGeneratePlanPrompt(req: {
   goal: 'muscle_gain' | 'fat_loss' | 'strength' | 'endurance';
   duration_weeks: number;
   workouts_per_week: number;
   pr_context?: any[];
   profile_context?: any;
+  preferences_context?: { muscle_group: string; exercises: string[] }[];
+  day_keywords?: string[];
 }): string {
   const principle = GOAL_TRAINING_PRINCIPLES[req.goal];
   const prSummary = (req.pr_context && req.pr_context.length > 0)
@@ -213,9 +201,22 @@ export function buildGeneratePlanPrompt(req: {
   const profile = req.profile_context
     ? `\n## 用户资料\n- 性别: ${req.profile_context.gender === 'female' ? '女' : '男'}\n- 年龄: ${req.profile_context.age}\n- 体重: ${req.profile_context.weight_kg}kg\n- 身高: ${req.profile_context.height_cm}cm\n- 经验等级: ${req.profile_context.training_experience === 'beginner' ? '新手（<1年）' : req.profile_context.training_experience === 'advanced' ? '进阶（>3年）' : '中级（1-3年）'}`
     : '';
-
+  const preferences = req.preferences_context && req.preferences_context.length > 0
+    ? `\n## 用户常用动作偏好（请优先使用这些动作来安排训练日动作）\n${
+        req.preferences_context.map(p =>
+          `- ${p.muscle_group}：${p.exercises.join('、')}`
+        ).join('\n')
+      }`
+    : '';
+  const dayKw = req.day_keywords && req.day_keywords.length > 0
+    ? `\n## 每日训练方向\n用户希望按以下顺序安排每周的每个训练日：\n${
+        req.day_keywords.map((kw, i) => {
+          const label = (MUSCLE_KEYWORDS as any)[kw]?.label || kw;
+          return `- 训练日${i + 1}：${label}（${(MUSCLE_KEYWORDS as any)[kw]?.muscleGroups?.join(', ') || kw}）`;
+        }).join('\n')
+      }\n请严格按照这个顺序和肌群分配来安排每天的具体动作。如果某天是"休息"，则跳过。`
+    : '';
   return `你是一位 CSCS 认证的力量与体能教练。请为用户生成一份为期 ${req.duration_weeks} 周、每周 ${req.workouts_per_week} 练的训练计划。
-
 ## 用户目标：${principle.title}
 ## 训练原则
 - 分化方式：${principle.split}
@@ -226,7 +227,8 @@ export function buildGeneratePlanPrompt(req: {
 - 每日动作数：${principle.exercises_per_day}
 ${prSummary}
 ${profile}
-
+${preferences}
+${dayKw}
 ## 注意事项
 1. 请将训练日合理分配到 week 0(周一)到 week 6(周日) 中，避免连续 3 天大强度训练
 2. 一周实际训练日 = ${req.workouts_per_week}，其余天为休息日（is_rest_day=true）
@@ -234,7 +236,6 @@ ${profile}
 4. exercise_type 枚举：bench_press, squat, deadlift, overhead_press, barbell_row, pull_up, dumbbell_fly, leg_press, leg_curl, leg_extension, lateral_raise, bicep_curl, tricep_pushdown, cable_crossover, dumbbell_shoulder_press, face_pull, hip_thrust, calf_raise, plank, push_up, dip, running, swimming, cycling, rowing, jumping_rope, other
 5. day_of_week：0=周日，1=周一，2=周二，3=周三，4=周四，5=周五，6=周六
 6. 休息日 is_rest_day=true，exercises 为空数组
-
 ## 输出 JSON Schema（严格输出）
 {
   "name": "4周增肌周期 - 上下肢分化",
@@ -257,7 +258,7 @@ ${profile}
           "target_sets": 4,
           "target_reps": "8-10",
           "target_weight_kg": 60,
-          "rpe_target": 7.5,
+          "rpe_target": 7,
           "notes": "渐进超负荷，每周+2.5kg",
           "order_index": 0
         }
@@ -273,7 +274,7 @@ ${profile}
     }
   ]
 }
-
 day_name 格式示例："Day A - 胸三头日"、"Day B - 背二头日"、"Day C - 腿日"、"HIIT + 核心日"
+注意：rpe_target 必须是 1-10 的整数（如 7、8），不要带小数！
 只输出 JSON，不要任何其他文字，不要 Markdown 代码块。`;
 }
