@@ -40,8 +40,8 @@ git push -u origin main
 ```
 http://localhost:3000/auth/callback
 http://localhost:3000/**
-https://fitness-ai-coach.vercel.app/auth/callback
-https://fitness-ai-coach.vercel.app/**
+https://fitness-ai-coach-kfnekdq0r-pks2.vercel.app/auth/callback
+https://fitness-ai-coach-kfnekdq0r-pks2.vercel.app/**
 ```
 > 如果你想绑定自己的域名（比如 `fit.jeff.dev`），也加上：
 > `https://你的域名/auth/callback`

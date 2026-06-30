@@ -7,13 +7,15 @@ import CycleManager from "@/components/CycleManager";
 import BottomNav from "@/components/BottomNav";
 import WorkoutHistory from "@/components/WorkoutHistory";
 import ProfilePage from "@/components/ProfilePage";
+import TodayDashboard from "@/components/TodayDashboard";
 import {
   Dumbbell,
   BarChart3,
   History,
-  Settings,
+  CalendarDays,
   UserCircle,
   LogOut,
+  Home as HomeIcon,
 } from "lucide-react";
 import LinkAccountModal from "@/components/LinkAccountModal";
 type Tab = "log" | "stats" | "history" | "cycles" | "profile";
@@ -23,11 +25,11 @@ export default function Home() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [showLinkModal, setShowLinkModal] = useState(false);
   const triggerRefresh = () => setRefreshKey((k) => k + 1);
-  const tabs: { id: Tab; label: string; icon: typeof Dumbbell }[] = [
-    { id: "log", label: "记录", icon: Dumbbell },
+  const tabs: { id: Tab; label: string; icon: typeof HomeIcon }[] = [
+    { id: "log", label: "首页", icon: HomeIcon },
     { id: "stats", label: "看板", icon: BarChart3 },
     { id: "history", label: "历史", icon: History },
-    { id: "cycles", label: "周期", icon: Settings },
+    { id: "cycles", label: "计划", icon: CalendarDays },
     { id: "profile", label: "个人", icon: UserCircle },
   ];
   return (
@@ -65,7 +67,12 @@ export default function Home() {
       </header>
       {/* Main Content */}
       <main className="flex-1 px-4 pt-4 pb-20">
-        {activeTab === "log" && <WorkoutInput onSuccess={triggerRefresh} />}
+        {activeTab === "log" && (
+          <div className="space-y-4">
+            <TodayDashboard key={`dash-${refreshKey}`} onRefresh={triggerRefresh} />
+            <WorkoutInput onSuccess={triggerRefresh} />
+          </div>
+        )}
         {activeTab === "stats" && (
           <StatsDashboard key={`stats-${refreshKey}`} />
         )}

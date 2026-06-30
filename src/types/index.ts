@@ -262,3 +262,80 @@ export interface TdeeResult {
     sick_adjustment: number;
   };
 }
+// --- 训练计划系统 ---
+export interface PlanExercise {
+  id?: string;
+  plan_id?: string;
+  day_id?: string;
+  user_id?: string;
+  exercise_name: string;
+  exercise_type: ExerciseType;
+  target_sets: number;
+  target_reps: string;
+  target_weight_kg?: number | null;
+  rpe_target?: number | null;
+  notes?: string | null;
+  order_index?: number;
+  created_at?: string;
+}
+export interface PlanDay {
+  id?: string;
+  plan_id?: string;
+  user_id?: string;
+  day_of_week: number;
+  day_name?: string | null;
+  focus?: string | null;
+  is_rest_day: boolean;
+  order_index?: number;
+  exercises?: PlanExercise[];
+  created_at?: string;
+}
+export interface CyclePlan {
+  id?: string;
+  user_id?: string;
+  cycle_id?: string | null;
+  name: string;
+  goal: UserGoal;
+  duration_weeks: number;
+  workouts_per_week: number;
+  start_date: string;
+  notes?: string | null;
+  days?: PlanDay[];
+  tdee_adjusted?: number | null;
+  created_at?: string;
+  updated_at?: string;
+}
+export interface GeneratePlanRequest {
+  goal: UserGoal;
+  duration_weeks: number;
+  workouts_per_week: number;
+  name?: string;
+  pr_context?: PersonalRecord[];
+  profile_context?: {
+    age: number;
+    weight_kg: number;
+    height_cm: number;
+    gender: string;
+    activity_level: ActivityLevel;
+    training_experience?: 'beginner' | 'intermediate' | 'advanced';
+  };
+}
+// --- 今日看板 ---
+export interface TodayDashboard {
+  today_weekday: number;
+  calorie_target: number;
+  calories_consumed_today: number;
+  weekly_calorie_burned: number;
+  weekly_calorie_target: number;
+  today_plan: PlanDay | null;
+  total_planned_sets_today: number;
+  workouts_completed_this_week: number;
+  workouts_planned_this_week: number;
+  active_cycle: {
+    id: string;
+    name: string;
+    goal: UserGoal | null;
+    tdee_adjusted: number | null;
+    plan: CyclePlan | null;
+  } | null;
+}

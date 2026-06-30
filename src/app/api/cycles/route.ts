@@ -43,6 +43,7 @@ export async function POST(request: NextRequest) {
         start_date: body.start_date || new Date().toISOString().slice(0, 10),
         notes: body.notes || null,
         goal: body.goal || null,
+        plan_id: body.plan_id || null,
         is_active: body.is_active !== false,
       })
       .select()
@@ -50,6 +51,11 @@ export async function POST(request: NextRequest) {
     if (error) {
       console.error("cycles POST error:", error);
       return NextResponse.json({ error: "创建周期失败" }, { status: 500 });
+    }
+    if (body.plan_id) {
+      await supabase.from("cycle_plans")
+        .update({ cycle_id: data.id, updated_at: new Date().toISOString() })
+        .eq("id", body.plan_id).eq("user_id", user.id);
     }
     return NextResponse.json({ cycle: data }, { status: 201 });
   } catch (err) {

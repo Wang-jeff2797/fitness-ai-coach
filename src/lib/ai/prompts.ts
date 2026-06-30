@@ -151,3 +151,129 @@ ${userFeedback}
 
 只输出 JSON，不要有任何其他文字，不要 Markdown 代码块。`;
 }
+
+// ============================================================
+// 训练计划生成（不同目标 → 不同训练体系）
+// ============================================================
+
+const GOAL_TRAINING_PRINCIPLES = {
+  muscle_gain: {
+    title: "肌肥大（增肌）",
+    split: "推/拉/腿 或 上下肢 分块训练，保证每肌群每周 2 次刺激",
+    rep_range: "8-12 次为主（肌肥大黄金范围），大肌群末组可 6-8 次",
+    sets_per_muscle: "每个肌群每周 10-20 组有效训练组",
+    rpe: "7-8 RPE，末 2 组留 1-2 次余量",
+    cardio: "每周 1-2 次低强度有氧或 LISS，避免影响恢复",
+    exercises_per_day: "4-6 个动作，大肌群 3-4 组 × 小肌群 2-3 组",
+  },
+  fat_loss: {
+    title: "减脂",
+    split: "全身训练 + 代谢调节，训练频率高以最大化能量消耗",
+    rep_range: "力量 10-15 次（高代谢压力），有氧 HIIT 或稳态",
+    sets_per_muscle: "每肌群每周 8-12 组（保留肌肉的最低有效量）",
+    rpe: "力量 7-8，有氧 HIIT 达 9，稳态达 6-7",
+    cardio: "每周 3-5 次：2 次 HIIT（10-20min）+ 2-3 次 LISS（30-45min）",
+    exercises_per_day: "6-8 个动作（超级组/循环组提高心率），末段加 conditioning",
+  },
+  strength: {
+    title: "增力（最大力量）",
+    split: "全身训练 或 上下肢 分化，以大重量复合动作为核心",
+    rep_range: "主项 3-6 次，辅助项 8-10 次",
+    sets_per_muscle: "每肌群每周 8-14 组，但单组强度高",
+    rpe: "主项 8-9（留 1 次余量），辅助 7-8，偶尔 9-10 PR 测试",
+    cardio: "每周 1-2 次低强度有氧，不可大强度避免神经系统疲劳",
+    exercises_per_day: "3-5 个动作，主项 4-6 组 × 辅助 2-3 组，组间休息 2-5min",
+  },
+  endurance: {
+    title: "耐力",
+    split: "有氧主导 + 力量维持，每周 5-6 天训练",
+    rep_range: "力量 12-20 次（肌耐力），有氧长距离或间歇",
+    sets_per_muscle: "力量每肌群每周 6-10 组，有氧根据目标项目安排",
+    rpe: "稳态 5-7，间歇 8-9，力量 6-7.5",
+    cardio: "每周 4-5 次：2 次 LSD（60-90min）+ 1-2 次间歇 + 1 节奏跑",
+    exercises_per_day: "力量动作 3-4 个（循环），有氧按计划单独安排或结合",
+  },
+} as const;
+
+export function buildGeneratePlanPrompt(req: {
+  goal: 'muscle_gain' | 'fat_loss' | 'strength' | 'endurance';
+  duration_weeks: number;
+  workouts_per_week: number;
+  pr_context?: any[];
+  profile_context?: any;
+}): string {
+  const principle = GOAL_TRAINING_PRINCIPLES[req.goal];
+  const prSummary = (req.pr_context && req.pr_context.length > 0)
+    ? `\n## 用户个人纪录（用于设定起始重量）\n${
+        req.pr_context.map(pr =>
+          `- ${pr.exercise}: 1RM≈${pr.estimated_1rm}kg（${pr.weight_kg}kg×${pr.reps}次，${pr.record_date}）`
+        ).join('\n')
+      }\n动作起始建议重量：复合动作 = 1RM × 65-75%（主项），辅助动作 = 1RM × 55-65%`
+    : '';
+  const profile = req.profile_context
+    ? `\n## 用户资料\n- 性别: ${req.profile_context.gender === 'female' ? '女' : '男'}\n- 年龄: ${req.profile_context.age}\n- 体重: ${req.profile_context.weight_kg}kg\n- 身高: ${req.profile_context.height_cm}cm\n- 经验等级: ${req.profile_context.training_experience === 'beginner' ? '新手（<1年）' : req.profile_context.training_experience === 'advanced' ? '进阶（>3年）' : '中级（1-3年）'}`
+    : '';
+
+  return `你是一位 CSCS 认证的力量与体能教练。请为用户生成一份为期 ${req.duration_weeks} 周、每周 ${req.workouts_per_week} 练的训练计划。
+
+## 用户目标：${principle.title}
+## 训练原则
+- 分化方式：${principle.split}
+- 次数范围：${principle.rep_range}
+- 每周量：${principle.sets_per_muscle}
+- 强度 RPE：${principle.rpe}
+- 有氧安排：${principle.cardio}
+- 每日动作数：${principle.exercises_per_day}
+${prSummary}
+${profile}
+
+## 注意事项
+1. 请将训练日合理分配到 week 0(周一)到 week 6(周日) 中，避免连续 3 天大强度训练
+2. 一周实际训练日 = ${req.workouts_per_week}，其余天为休息日（is_rest_day=true）
+3. 每个动作建议 target_weight_kg 基于经验或 PR 估算（新手复合动作建议空值让用户自填）
+4. exercise_type 枚举：bench_press, squat, deadlift, overhead_press, barbell_row, pull_up, dumbbell_fly, leg_press, leg_curl, leg_extension, lateral_raise, bicep_curl, tricep_pushdown, cable_crossover, dumbbell_shoulder_press, face_pull, hip_thrust, calf_raise, plank, push_up, dip, running, swimming, cycling, rowing, jumping_rope, other
+5. day_of_week：0=周日，1=周一，2=周二，3=周三，4=周四，5=周五，6=周六
+6. 休息日 is_rest_day=true，exercises 为空数组
+
+## 输出 JSON Schema（严格输出）
+{
+  "name": "4周增肌周期 - 上下肢分化",
+  "goal": "${req.goal}",
+  "duration_weeks": ${req.duration_weeks},
+  "workouts_per_week": ${req.workouts_per_week},
+  "start_date": "${new Date().toISOString().slice(0, 10)}",
+  "notes": "本周期重点：${principle.split}，渐进超负荷每周加 2.5kg 或 1 次",
+  "days": [
+    {
+      "day_of_week": 1,
+      "day_name": "Day A - 上肢推力日",
+      "focus": "胸·肩·三头",
+      "is_rest_day": false,
+      "order_index": 0,
+      "exercises": [
+        {
+          "exercise_name": "平板卧推",
+          "exercise_type": "bench_press",
+          "target_sets": 4,
+          "target_reps": "8-10",
+          "target_weight_kg": 60,
+          "rpe_target": 7.5,
+          "notes": "渐进超负荷，每周+2.5kg",
+          "order_index": 0
+        }
+      ]
+    },
+    {
+      "day_of_week": 0,
+      "day_name": "休息日",
+      "focus": "主动恢复",
+      "is_rest_day": true,
+      "order_index": 6,
+      "exercises": []
+    }
+  ]
+}
+
+day_name 格式示例："Day A - 胸三头日"、"Day B - 背二头日"、"Day C - 腿日"、"HIIT + 核心日"
+只输出 JSON，不要任何其他文字，不要 Markdown 代码块。`;
+}
