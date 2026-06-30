@@ -10,34 +10,50 @@ import type {
 export const dynamic = 'force-dynamic';
 function validatePlanLocally(plan: CyclePlan): CyclePlan {
   if (!plan.days || plan.days.length === 0) plan.days = [];
-  const usedDays = new Set<number>();
-  const orderedDays: PlanDay[] = [];
-  // 去重 day_of_week
-  for (const d of plan.days) {
-    if (usedDays.has(d.day_of_week)) continue;
-    usedDays.add(d.day_of_week);
-    orderedDays.push({ ...d, order_index: d.order_index ?? orderedDays.length });
-  }
-  // 补齐 7 天，缺失天设为休息日
-  for (let dow = 0; dow <= 6; dow++) {
-    if (!usedDays.has(dow)) {
-      orderedDays.push({
-        day_of_week: dow,
-        day_name: "休息日",
-        focus: "主动恢复",
-        is_rest_day: true,
-        order_index: orderedDays.length,
-        exercises: [],
-      });
+  const isDaily = plan.duration_type === 'daily';
+  if (isDaily) {
+    // 天轮模式：保持天数不变，只去重+排序
+    const usedDays = new Set<number>();
+    const orderedDays: PlanDay[] = [];
+    for (const d of plan.days) {
+      if (usedDays.has(d.day_of_week)) continue;
+      usedDays.add(d.day_of_week);
+      orderedDays.push({ ...d, order_index: d.order_index ?? orderedDays.length });
     }
+    orderedDays.sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0));
+    for (const day of orderedDays) {
+      if (!day.exercises) day.exercises = [];
+      day.exercises.sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0));
+    }
+    plan.days = orderedDays;
+  } else {
+    // 周模式：补齐 7 天（原有逻辑）
+    const usedDays = new Set<number>();
+    const orderedDays: PlanDay[] = [];
+    for (const d of plan.days) {
+      if (usedDays.has(d.day_of_week)) continue;
+      usedDays.add(d.day_of_week);
+      orderedDays.push({ ...d, order_index: d.order_index ?? orderedDays.length });
+    }
+    for (let dow = 0; dow <= 6; dow++) {
+      if (!usedDays.has(dow)) {
+        orderedDays.push({
+          day_of_week: dow,
+          day_name: "休息日",
+          focus: "主动恢复",
+          is_rest_day: true,
+          order_index: orderedDays.length,
+          exercises: [],
+        });
+      }
+    }
+    orderedDays.sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0));
+    for (const day of orderedDays) {
+      if (!day.exercises) day.exercises = [];
+      day.exercises.sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0));
+    }
+    plan.days = orderedDays;
   }
-  // 排序 days & exercises
-  orderedDays.sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0));
-  for (const day of orderedDays) {
-    if (!day.exercises) day.exercises = [];
-    day.exercises.sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0));
-  }
-  plan.days = orderedDays;
   return plan;
 }
 // ========= GET: 列出计划 或 单个计划详情（含 days + exercises）=========
@@ -89,13 +105,17 @@ export async function POST(request: NextRequest) {
       const planData = body as CyclePlan & { save_directly?: boolean };
       delete (planData as any).save_directly;
       const validated = validatePlanLocally(planData);
+      const isDaily = validated.duration_type === 'daily';
       const { data: plan, error: pErr } = await supabase
         .from("cycle_plans").insert({
           user_id: user.id,
           name: validated.name,
           goal: validated.goal,
-          duration_weeks: validated.duration_weeks,
-          workouts_per_week: validated.workouts_per_week,
+          duration_type: isDaily ? 'daily' : 'weekly',
+          duration_weeks: isDaily ? null : (validated.duration_weeks || 4),
+          workouts_per_week: isDaily ? null : (validated.workouts_per_week || 3),
+          total_days: isDaily ? validated.total_days : null,
+          total_rounds: isDaily ? validated.total_rounds : null,
           start_date: validated.start_date || new Date().toISOString().slice(0, 10),
           cycle_id: validated.cycle_id || null,
           notes: validated.notes || null,
@@ -199,18 +219,34 @@ export async function POST(request: NextRequest) {
       planResult = buildFallbackPlan(req);
     }
     planResult.goal = req.goal;
-    planResult.duration_weeks = req.duration_weeks;
-    planResult.workouts_per_week = req.workouts_per_week;
-    planResult.name = req.name || planResult.name || defaultPlanName(req.goal, req.duration_weeks);
+    planResult.duration_type = req.duration_type || 'weekly';
+    if (req.duration_type === 'daily') {
+      planResult.duration_weeks = undefined;
+      planResult.workouts_per_week = undefined;
+      planResult.total_days = req.total_days;
+      planResult.total_rounds = req.total_rounds;
+    } else {
+      planResult.duration_weeks = req.duration_weeks;
+      planResult.workouts_per_week = req.workouts_per_week;
+    }
+    planResult.name = req.name || planResult.name || (
+      req.duration_type === 'daily'
+        ? defaultPlanName(req.goal, req.total_days || 5, true)
+        : defaultPlanName(req.goal, req.duration_weeks || 4)
+    );
     const validated = validatePlanLocally(planResult);
     // === 保存到 DB ===
+    const isDaily = validated.duration_type === 'daily';
     const { data: savedPlan, error: planErr } = await supabase
       .from("cycle_plans").insert({
         user_id: user.id,
         name: validated.name,
         goal: validated.goal,
-        duration_weeks: validated.duration_weeks,
-        workouts_per_week: validated.workouts_per_week,
+        duration_type: isDaily ? 'daily' : 'weekly',
+        duration_weeks: isDaily ? null : (validated.duration_weeks || 4),
+        workouts_per_week: isDaily ? null : (validated.workouts_per_week || 3),
+        total_days: isDaily ? validated.total_days : null,
+        total_rounds: isDaily ? validated.total_rounds : null,
         start_date: validated.start_date || new Date().toISOString().slice(0, 10),
         notes: validated.notes || null,
       }).select().single();
@@ -269,8 +305,16 @@ export async function PUT(request: NextRequest) {
     if (!existingPlan) return NextResponse.json({ error: "计划不存在" }, { status: 404 });
     // 更新 plan 基本字段
     const patch: any = {};
-    for (const f of ["name", "goal", "duration_weeks", "workouts_per_week", "start_date", "notes", "cycle_id"] as const) {
+    for (const f of ["name", "goal", "duration_weeks", "workouts_per_week", "start_date", "notes", "cycle_id", "duration_type", "total_days", "total_rounds"] as const) {
       if (body[f] !== undefined) patch[f] = body[f];
+    }
+    // 如果切换了模式，清理另一模式的字段
+    if (patch.duration_type === 'daily') {
+      patch.duration_weeks = null;
+      patch.workouts_per_week = null;
+    } else if (patch.duration_type === 'weekly') {
+      patch.total_days = null;
+      patch.total_rounds = null;
     }
     if (Object.keys(patch).length > 0) {
       patch.updated_at = new Date().toISOString();
@@ -366,18 +410,59 @@ export async function DELETE(request: NextRequest) {
   }
 }
 // ===================== 工具函数 =====================
-function defaultPlanName(goal: string, weeks: number): string {
+function defaultPlanName(goal: string, weeksOrDays: number, isDaily?: boolean): string {
+  if (isDaily) {
+    const n: Record<string, string> = {
+      muscle_gain: `${weeksOrDays}天增肌计划`,
+      fat_loss: `${weeksOrDays}天减脂计划`,
+      strength: `${weeksOrDays}天增力计划`,
+      endurance: `${weeksOrDays}天耐力计划`,
+    };
+    return n[goal] || `${weeksOrDays}天训练计划`;
+  }
   const n: Record<string, string> = {
-    muscle_gain: `${weeks}周增肌周期`,
-    fat_loss: `${weeks}周减脂周期`,
-    strength: `${weeks}周增力周期`,
-    endurance: `${weeks}周耐力周期`,
+    muscle_gain: `${weeksOrDays}周增肌周期`,
+    fat_loss: `${weeksOrDays}周减脂周期`,
+    strength: `${weeksOrDays}周增力周期`,
+    endurance: `${weeksOrDays}周耐力周期`,
   };
-  return n[goal] || `${weeks}周训练周期`;
+  return n[goal] || `${weeksOrDays}周训练周期`;
 }
 function buildFallbackPlan(req: GeneratePlanRequest): CyclePlan {
-  const dowDays = [1, 3, 5].slice(0, Math.min(req.workouts_per_week, 6));
-  while (dowDays.length < Math.min(req.workouts_per_week, 6)) {
+  const isDaily = req.duration_type === 'daily';
+  if (isDaily) {
+    const totalDays = req.total_days || 5;
+    const defaultSplits: Record<string, string[]> = {
+      muscle_gain: ["上肢推力日（胸·肩·三头）", "下肢日（腿·臀）", "上肢拉力日（背·二头）", "全身+核心", "有氧+轻力量", "循环代谢训练"],
+      fat_loss: ["全身力量A", "HIIT + 核心", "全身力量B", "稳态有氧LISS", "循环力量+有氧", "周末活动"],
+      strength: ["全身力量A（主项：卧推/深蹲）", "辅助动作+技术", "全身力量B（主项：硬拉/推举）", "轻量恢复训练", "有氧恢复", "技术训练"],
+      endurance: ["稳态有氧LSD", "力量维持A", "间歇训练HIIT", "力量维持B", "节奏跑/节奏骑", "长距离有氧"],
+    };
+    const splits = defaultSplits[req.goal] || defaultSplits.muscle_gain;
+    const days: PlanDay[] = Array.from({ length: totalDays }, (_, idx) => ({
+      day_of_week: idx,
+      day_name: `Day ${idx + 1} - ${splits[idx % splits.length] || "综合训练日"}`,
+      focus: splits[idx % splits.length] || "综合训练",
+      is_rest_day: false,
+      order_index: idx,
+      exercises: buildDefaultExercises(req.goal, idx % 6),
+    }));
+    return {
+      name: defaultPlanName(req.goal, totalDays, true),
+      goal: req.goal,
+      duration_type: 'daily',
+      total_days: totalDays,
+      total_rounds: req.total_rounds || 3,
+      duration_weeks: undefined,
+      workouts_per_week: undefined,
+      start_date: new Date().toISOString().slice(0, 10),
+      notes: "AI 暂不可用，使用本地默认模板。建议根据实际情况调整。",
+      days,
+    };
+  }
+  // 周模式（原有逻辑）
+  const dowDays = [1, 3, 5].slice(0, Math.min(req.workouts_per_week || 3, 6));
+  while (dowDays.length < Math.min(req.workouts_per_week || 3, 6)) {
     for (let d = 2; d <= 6; d++) if (!dowDays.includes(d)) { dowDays.push(d); break; }
   }
   const defaultSplits: Record<string, string[]> = {
@@ -396,10 +481,11 @@ function buildFallbackPlan(req: GeneratePlanRequest): CyclePlan {
     exercises: buildDefaultExercises(req.goal, idx),
   }));
   return {
-    name: defaultPlanName(req.goal, req.duration_weeks),
+    name: defaultPlanName(req.goal, req.duration_weeks || 4),
     goal: req.goal,
-    duration_weeks: req.duration_weeks,
-    workouts_per_week: req.workouts_per_week,
+    duration_type: 'weekly',
+    duration_weeks: req.duration_weeks || 4,
+    workouts_per_week: req.workouts_per_week || 3,
     start_date: new Date().toISOString().slice(0, 10),
     notes: "AI 暂不可用，使用本地默认模板。建议根据实际情况调整动作和重量。",
     days,

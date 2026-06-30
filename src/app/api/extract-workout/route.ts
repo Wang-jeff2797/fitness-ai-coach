@@ -22,25 +22,21 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
-    if (!body.cycle_id) {
-      return NextResponse.json<ExtractWorkoutResponse>(
-        { success: false, error: "周期 ID 不能为空" },
-        { status: 400 }
-      );
-    }
     const supabase = await createServerSupabaseClient();
-    // 验证周期
-    const { data: cycle } = await supabase
-      .from("cycles")
-      .select("id")
-      .eq("id", body.cycle_id)
-      .eq("user_id", user.id)
-      .single();
-    if (!cycle) {
-      return NextResponse.json<ExtractWorkoutResponse>(
-        { success: false, error: "周期不存在" },
-        { status: 404 }
-      );
+    // 如果提供了周期 ID，验证它是否存在
+    if (body.cycle_id) {
+      const { data: cycle } = await supabase
+        .from("cycles")
+        .select("id")
+        .eq("id", body.cycle_id)
+        .eq("user_id", user.id)
+        .single();
+      if (!cycle) {
+        return NextResponse.json<ExtractWorkoutResponse>(
+          { success: false, error: "周期不存在" },
+          { status: 404 }
+        );
+      }
     }
     // === 获取用户设置作为 AI 上下文 ===
     const { data: userSettings } = await supabase
@@ -108,7 +104,7 @@ export async function POST(request: NextRequest) {
       .from("workouts")
       .insert({
         user_id: user.id,
-        cycle_id: body.cycle_id,
+        cycle_id: body.cycle_id || null,
         session_data: sessionData,
         raw_input: null,
         performed_at: new Date().toISOString(),

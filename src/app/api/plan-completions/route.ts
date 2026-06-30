@@ -266,18 +266,22 @@ async function getPlanStats(
   const overallPercentage = totalTrainingDays > 0
     ? Math.min(Math.round((totalCompletedDays / totalTrainingDays) * 100), 100)
     : 0;
-  // 计划总周数 * 每周天数 = 应该完成的总训练次数
-  // 更精确：计划的总训练日 = trainingDays.length（覆盖一周的所有训练日）
-  // 整体完成度 = 已完成的独特训练日 / 总训练日
-  // 但实际用户可能是多周计划，所以应该按周数计算
+  // 获取计划模式信息
   const { data: plan } = await supabase
     .from("cycle_plans")
-    .select("duration_weeks, workouts_per_week")
+    .select("duration_type, duration_weeks, workouts_per_week, total_days, total_rounds")
     .eq("id", planId)
     .single();
-  const totalExpectedWorkouts = plan
-    ? (plan.duration_weeks * plan.workouts_per_week)
-    : totalTrainingDays;
+  let totalExpectedWorkouts: number;
+  if (plan?.duration_type === 'daily') {
+    // 天轮模式：总训练日 = total_days * total_rounds
+    totalExpectedWorkouts = (plan.total_days || totalTrainingDays) * (plan.total_rounds || 1);
+  } else {
+    // 周模式：总训练日 = duration_weeks * workouts_per_week
+    totalExpectedWorkouts = plan
+      ? (plan.duration_weeks * plan.workouts_per_week)
+      : totalTrainingDays;
+  }
   const overallPct = totalExpectedWorkouts > 0
     ? Math.min(Math.round((totalCompletedDays / totalExpectedWorkouts) * 100), 100)
     : 0;

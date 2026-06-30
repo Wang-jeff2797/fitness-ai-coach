@@ -183,14 +183,18 @@ const GOAL_TRAINING_PRINCIPLES = {
 } as const;
 export function buildGeneratePlanPrompt(req: {
   goal: 'muscle_gain' | 'fat_loss' | 'strength' | 'endurance';
-  duration_weeks: number;
-  workouts_per_week: number;
+  duration_type?: 'weekly' | 'daily';
+  duration_weeks?: number;
+  workouts_per_week?: number;
+  total_days?: number;
+  total_rounds?: number;
   pr_context?: any[];
   profile_context?: any;
   preferences_context?: { muscle_group: string; exercises: string[] }[];
   day_keywords?: string[];
 }): string {
   const principle = GOAL_TRAINING_PRINCIPLES[req.goal];
+  const isDaily = req.duration_type === 'daily';
   const prSummary = (req.pr_context && req.pr_context.length > 0)
     ? `\n## 用户个人纪录（用于设定起始重量）\n${
         req.pr_context.map(pr =>
@@ -209,14 +213,17 @@ export function buildGeneratePlanPrompt(req: {
       }`
     : '';
   const dayKw = req.day_keywords && req.day_keywords.length > 0
-    ? `\n## 每日训练方向\n用户希望按以下顺序安排每周的每个训练日：\n${
+    ? `\n## 每日训练方向\n用户希望按以下顺序安排${isDaily ? '' : '每周的'}每个训练日：\n${
         req.day_keywords.map((kw, i) => {
           const label = (MUSCLE_KEYWORDS as any)[kw]?.label || kw;
           return `- 训练日${i + 1}：${label}（${(MUSCLE_KEYWORDS as any)[kw]?.muscleGroups?.join(', ') || kw}）`;
         }).join('\n')
       }\n请严格按照这个顺序和肌群分配来安排每天的具体动作。如果某天是"休息"，则跳过。`
     : '';
-  return `你是一位 CSCS 认证的力量与体能教练。请为用户生成一份为期 ${req.duration_weeks} 周、每周 ${req.workouts_per_week} 练的训练计划。
+  if (isDaily) {
+    const totalDays = req.total_days || 5;
+    const totalRounds = req.total_rounds || 3;
+    return `你是一位 CSCS 认证的力量与体能教练。请为用户生成一份共计 ${totalDays} 个训练日、重复 ${totalRounds} 轮的训练计划。
 ## 用户目标：${principle.title}
 ## 训练原则
 - 分化方式：${principle.split}
@@ -230,18 +237,75 @@ ${profile}
 ${preferences}
 ${dayKw}
 ## 注意事项
-1. 请将训练日合理分配到 week 0(周一)到 week 6(周日) 中，避免连续 3 天大强度训练
-2. 一周实际训练日 = ${req.workouts_per_week}，其余天为休息日（is_rest_day=true）
+1. 请生成 ${totalDays} 个独特的训练日（不包含休息日），day_of_week 从 0 到 ${totalDays - 1} 连续编号
+2. 每个训练日都安排具体动作，没有休息日
+3. 每个动作建议 target_weight_kg 基于经验或 PR 估算
+4. exercise_type 枚举：bench_press, squat, deadlift, overhead_press, barbell_row, pull_up, dumbbell_fly, leg_press, leg_curl, leg_extension, lateral_raise, bicep_curl, tricep_pushdown, cable_crossover, dumbbell_shoulder_press, face_pull, hip_thrust, calf_raise, plank, push_up, dip, running, swimming, cycling, rowing, jumping_rope, other
+5. day_of_week 从 0 开始递增（0=第1天，1=第2天，依此类推）
+## 输出 JSON Schema（严格输出）
+{
+  "name": "${totalDays}天${GOAL_TRAINING_PRINCIPLES[req.goal].title}计划",
+  "goal": "${req.goal}",
+  "duration_type": "daily",
+  "total_days": ${totalDays},
+  "total_rounds": ${totalRounds},
+  "start_date": "${new Date().toISOString().slice(0, 10)}",
+  "notes": "本计划重点：${principle.split}",
+  "days": [
+    {
+      "day_of_week": 0,
+      "day_name": "Day 1 - 训练内容",
+      "focus": "训练重点",
+      "is_rest_day": false,
+      "order_index": 0,
+      "exercises": [
+        {
+          "exercise_name": "动作名称",
+          "exercise_type": "bench_press",
+          "target_sets": 4,
+          "target_reps": "8-10",
+          "target_weight_kg": 60,
+          "rpe_target": 7,
+          "notes": "备注",
+          "order_index": 0
+        }
+      ]
+    }
+  ]
+}
+day_name 格式示例："Day 1 - 胸三头日"、"Day 2 - 背二头日"、"Day 3 - 腿日"
+注意：rpe_target 必须是 1-10 的整数（如 7、8），不要带小数！
+只输出 JSON，不要任何其他文字，不要 Markdown 代码块。`;
+  }
+  const durationWeeks = req.duration_weeks || 4;
+  const workoutsPerWeek = req.workouts_per_week || 3;
+  return `你是一位 CSCS 认证的力量与体能教练。请为用户生成一份为期 ${durationWeeks} 周、每周 ${workoutsPerWeek} 练的训练计划。
+## 用户目标：${principle.title}
+## 训练原则
+- 分化方式：${principle.split}
+- 次数范围：${principle.rep_range}
+- 每周量：${principle.sets_per_muscle}
+- 强度 RPE：${principle.rpe}
+- 有氧安排：${principle.cardio}
+- 每日动作数：${principle.exercises_per_day}
+${prSummary}
+${profile}
+${preferences}
+${dayKw}
+## 注意事项
+1. 请将训练日合理分配到 day_of_week 0(周日)到 6(周六) 中，避免连续 3 天大强度训练
+2. 一周实际训练日 = ${workoutsPerWeek}，其余天为休息日（is_rest_day=true）
 3. 每个动作建议 target_weight_kg 基于经验或 PR 估算（新手复合动作建议空值让用户自填）
 4. exercise_type 枚举：bench_press, squat, deadlift, overhead_press, barbell_row, pull_up, dumbbell_fly, leg_press, leg_curl, leg_extension, lateral_raise, bicep_curl, tricep_pushdown, cable_crossover, dumbbell_shoulder_press, face_pull, hip_thrust, calf_raise, plank, push_up, dip, running, swimming, cycling, rowing, jumping_rope, other
 5. day_of_week：0=周日，1=周一，2=周二，3=周三，4=周四，5=周五，6=周六
 6. 休息日 is_rest_day=true，exercises 为空数组
 ## 输出 JSON Schema（严格输出）
 {
-  "name": "4周增肌周期 - 上下肢分化",
+  "name": "${durationWeeks}周${GOAL_TRAINING_PRINCIPLES[req.goal].title}周期",
   "goal": "${req.goal}",
-  "duration_weeks": ${req.duration_weeks},
-  "workouts_per_week": ${req.workouts_per_week},
+  "duration_type": "weekly",
+  "duration_weeks": ${durationWeeks},
+  "workouts_per_week": ${workoutsPerWeek},
   "start_date": "${new Date().toISOString().slice(0, 10)}",
   "notes": "本周期重点：${principle.split}，渐进超负荷每周加 2.5kg 或 1 次",
   "days": [

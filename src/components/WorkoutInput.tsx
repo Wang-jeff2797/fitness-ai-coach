@@ -45,7 +45,7 @@ export default function WorkoutInput({ onSuccess }: WorkoutInputProps) {
       .catch(() => {});
   }, []);
   const handleSubmit = async () => {
-    if (!text.trim() || !cycleId) return;
+    if (!text.trim()) return;
     setLoading(true);
     setResult(null);
     try {
@@ -54,13 +54,13 @@ export default function WorkoutInput({ onSuccess }: WorkoutInputProps) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           text: text.trim(),
-          cycle_id: cycleId,
+          cycle_id: cycleId || undefined,
           plan_id: selectedPlanId || undefined,
         }),
       });
       const data = await res.json();
       if (data.success) {
-        setResult({ success: true, message: "训练记录已保存！" + (data.completed_count ? ` 已关联 ${data.completed_count} 个计划动作` : "") });
+        setResult({ success: true, message: "训练记录已保存！" + (data.completed_count ? ` 已关联 ${data.completed_count} 个计划动作` : "") + (!cycleId ? "（未关联周期）" : "") });
         setText("");
         setShowSuggestions(false);
         onSuccess?.();
@@ -91,14 +91,14 @@ export default function WorkoutInput({ onSuccess }: WorkoutInputProps) {
       <div className="card p-4 space-y-2.5">
         <div>
           <label className="block text-xs font-medium text-gray-500 mb-1.5">
-            当前训练周期
+            关联周期 <span className="text-gray-400 font-normal">（可选，不选仅记录训练）</span>
           </label>
           <select
             value={cycleId}
             onChange={(e) => setCycleId(e.target.value)}
             className="input-field"
           >
-            <option value="">选择周期...</option>
+            <option value="">不关联周期...</option>
             {cycles.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name} {c.is_active ? "(活跃)" : ""}
@@ -149,7 +149,7 @@ export default function WorkoutInput({ onSuccess }: WorkoutInputProps) {
         <div className="mt-2 flex items-center gap-2">
           <button
             onClick={handleSubmit}
-            disabled={loading || !text.trim() || !cycleId}
+            disabled={loading || !text.trim()}
             className="btn-primary flex-1"
           >
             {loading ? (

@@ -58,7 +58,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const isAnonymous = user?.is_anonymous ?? false;
   const signUp = useCallback(async (email: string, password: string) => {
     if (!supabase) return { error: "客户端未初始化" };
-    const { error } = await supabase.auth.signUp({ email, password });
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        emailRedirectTo: `${window.location.origin}/auth/callback`,
+      },
+    });
     if (error) return { error: error.message };
     return {};
   }, [supabase]);

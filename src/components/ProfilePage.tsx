@@ -15,6 +15,8 @@ import {
   CheckCircle2,
 } from "lucide-react";
 import ExercisePreferencesPanel from "./ExercisePreferencesPanel";
+import { MUSCLE_GROUPS } from "@/lib/exercise-library";
+import type { MuscleGroup } from "@/types";
 type ProfileTab = "info" | "lifestyle" | "settings" | "pr" | "unknown" | "preferences";
 export default function ProfilePage() {
   const [activeTab, setActiveTab] = useState<ProfileTab>("info");
@@ -35,26 +37,37 @@ export default function ProfilePage() {
   const activeCycle = cycles.find((c: any) => c.is_active);
   return (
     <div className="space-y-4">
-      {/* 子标签导航 */}
-      <div className="flex overflow-x-auto gap-1 pb-1 scrollbar-hide">
-        {tabs.map((tab) => {
-          const Icon = tab.icon;
-          const isActive = activeTab === tab.id;
-          return (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium whitespace-nowrap transition-colors ${
-                isActive
-                  ? "bg-primary-100 text-primary-700"
-                  : "text-gray-500 hover:text-gray-700 hover:bg-gray-100"
-              }`}
-            >
-              <Icon className="w-3.5 h-3.5" />
-              {tab.label}
-            </button>
-          );
-        })}
+      {/* 子标签导航 - 可横向滚动 */}
+      <div className="relative">
+        <div className="flex overflow-x-auto gap-1 pb-1 scrollbar-hide snap-x">
+          {tabs.map((tab) => {
+            const Icon = tab.icon;
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => {
+                  setActiveTab(tab.id);
+                  // 点击后将该标签滚动到可视区域
+                  setTimeout(() => {
+                    document.getElementById(`profile-tab-${tab.id}`)?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+                  }, 50);
+                }}
+                id={`profile-tab-${tab.id}`}
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium whitespace-nowrap transition-colors snap-start shrink-0 ${
+                  isActive
+                    ? "bg-primary-100 text-primary-700"
+                    : "text-gray-500 hover:text-gray-700 hover:bg-gray-100"
+                }`}
+              >
+                <Icon className="w-3.5 h-3.5" />
+                {tab.label}
+              </button>
+            );
+          })}
+        </div>
+        {/* 右侧渐变指示器 */}
+        <div className="absolute right-0 top-0 bottom-1 w-8 bg-gradient-to-l from-white to-transparent pointer-events-none" />
       </div>
       {activeTab === "info" && <ProfileInfoForm />}
       {activeTab === "lifestyle" && <LifestyleFeedbackForm activeCycle={activeCycle} />}
@@ -492,13 +505,18 @@ function PersonalRecordsForm() {
   );
 }
 // ============================================================
-// 5. 未知动作
+// 5. 未知动作 - 学习后可选添加为常用动作
 // ============================================================
 function UnknownActionsForm() {
   const [actions, setActions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [learning, setLearning] = useState<string | null>(null);
   const [learnResult, setLearnResult] = useState<string | null>(null);
+  // 学习后添加到偏好
+  const [pendingAdd, setPendingAdd] = useState<{ action_name: string; exercise_type: string } | null>(null);
+  const [selectedMuscleGroup, setSelectedMuscleGroup] = useState<MuscleGroup>("chest");
+  const [addingPref, setAddingPref] = useState(false);
+  const [addPrefError, setAddPrefError] = useState<string | null>(null);
   const loadActions = () => {
     fetch("/api/learn-action").then(r => r.json()).then(d => {
       if (d.actions) setActions(d.actions.filter((a: any) => !a.is_learned));
@@ -517,12 +535,51 @@ function UnknownActionsForm() {
       const data = await res.json();
       if (data.action) {
         setLearnResult(`${name} → MET: ${data.action.met_value} (${data.explanation || "已学习"})`);
+        // 弹出肌肉群选择器
+        setPendingAdd({ action_name: data.action.action_name, exercise_type: data.action.category || "other" });
+        setSelectedMuscleGroup("chest");
         loadActions();
       }
     } catch {} finally {
       setLearning(null);
     }
   };
+  /** 添加到常用动作偏好 */
+  const addToPreferences = async () => {
+    if (!pendingAdd) return;
+    setAddingPref(true);
+    setAddPrefError(null);
+    try {
+      const res = await fetch("/api/exercise-preferences", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          preferences: [{
+            muscle_group: selectedMuscleGroup,
+            exercise_name: pendingAdd.action_name,
+            exercise_type: pendingAdd.exercise_type === "cardio" ? "running" : "other",
+            weight: 0.5,
+            is_favorite: false,
+            usage_count: 0,
+          }],
+        }),
+      });
+      const d = await res.json();
+      if (d.success) {
+        setLearnResult(`${pendingAdd.action_name} 已学习并添加到「${MUSCLE_GROUPS[selectedMuscleGroup].label}」常用动作`);
+        setPendingAdd(null);
+      } else {
+        setAddPrefError("保存失败");
+      }
+    } catch {
+      setAddPrefError("网络错误");
+    } finally {
+      setAddingPref(false);
+    }
+  };
+  // 所有肌肉群选项（排除 full_body）
+  const muscleGroupOptions = (Object.entries(MUSCLE_GROUPS) as [string, typeof MUSCLE_GROUPS[string]][])
+    .filter(([key]) => key !== "full_body");
   return (
     <div className="card p-4 space-y-4">
       <div className="flex items-center gap-2">
@@ -530,7 +587,7 @@ function UnknownActionsForm() {
         <h3 className="font-semibold text-gray-900">未知动作学习</h3>
       </div>
       <p className="text-xs text-gray-400 -mt-2">
-        AI 提取时未在 MET 库中找到的动作，可以逐个学习
+        AI 提取时未在 MET 库中找到的动作，可以逐个学习并添加到常用动作
       </p>
       {learnResult && (
         <div className="bg-green-50 text-green-700 text-xs px-3 py-2 rounded-xl flex items-center gap-1.5">
@@ -554,10 +611,50 @@ function UnknownActionsForm() {
               </div>
               <button onClick={() => learnAction(a.action_name)} disabled={learning === a.action_name}
                 className="btn-primary text-xs px-3 py-1.5">
-                {learning === a.action_name ? <Loader2 className="w-3 h-3 animate-spin" /> : "学习"}
+                {learning === a.action_name ? <Loader2 className="w-3 h-3 animate-spin" /> : "学习并添加"}
               </button>
             </div>
           ))}
+        </div>
+      )}
+      {/* 学习后添加到常用动作的弹窗 */}
+      {pendingAdd && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-end sm:items-center justify-center p-4"
+          onClick={() => setPendingAdd(null)}>
+          <div className="bg-white rounded-2xl w-full max-w-sm p-5 space-y-4 shadow-xl"
+            onClick={e => e.stopPropagation()}>
+            <div className="text-center">
+              <CheckCircle2 className="w-8 h-8 text-green-500 mx-auto mb-1" />
+              <p className="font-semibold text-gray-900">已学习: {pendingAdd.action_name}</p>
+              <p className="text-xs text-gray-400 mt-1">选择要添加到哪个部位:</p>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {muscleGroupOptions.map(([key, group]) => (
+                <button key={key}
+                  onClick={() => setSelectedMuscleGroup(key as MuscleGroup)}
+                  className={`px-3 py-2.5 rounded-xl text-xs font-medium border transition-colors ${
+                    selectedMuscleGroup === key
+                      ? "border-primary-400 bg-primary-50 text-primary-700"
+                      : "border-gray-100 bg-gray-50 text-gray-600 hover:bg-gray-100"
+                  }`}>
+                  {group.icon} {group.label}
+                </button>
+              ))}
+            </div>
+            {addPrefError && (
+              <p className="text-xs text-red-500 text-center">{addPrefError}</p>
+            )}
+            <div className="flex gap-2">
+              <button onClick={() => setPendingAdd(null)}
+                className="flex-1 px-3 py-2 rounded-xl text-xs font-medium bg-gray-100 text-gray-600 hover:bg-gray-200">
+                跳过
+              </button>
+              <button onClick={addToPreferences} disabled={addingPref}
+                className="flex-1 px-3 py-2 rounded-xl text-xs font-medium bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-50">
+                {addingPref ? <Loader2 className="w-3 h-3 animate-spin mx-auto" /> : "添加到常用动作"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

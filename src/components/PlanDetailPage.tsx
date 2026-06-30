@@ -6,18 +6,15 @@ import {
   Loader2, Edit3, Zap, Flame,
 } from "lucide-react";
 import type { CyclePlan, PlanDay, PlanExercise, PlanCompletionStats } from "@/types";
-
 const WEEKDAY_NAMES = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
 const GOAL_LABEL: Record<string, string> = {
   muscle_gain: "增肌", fat_loss: "减脂", strength: "增力", endurance: "耐力",
 };
-
 interface PlanDetailPageProps {
   planId: string;
   onBack: () => void;
   onRefresh?: () => void;
 }
-
 export default function PlanDetailPage({ planId, onBack, onRefresh }: PlanDetailPageProps) {
   const [plan, setPlan] = useState<CyclePlan | null>(null);
   const [stats, setStats] = useState<PlanCompletionStats | null>(null);
@@ -28,10 +25,8 @@ export default function PlanDetailPage({ planId, onBack, onRefresh }: PlanDetail
   const [error, setError] = useState<string | null>(null);
   const [activeDayIdx, setActiveDayIdx] = useState<number | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-
   const today = new Date().toISOString().slice(0, 10);
   const todayDow = new Date().getDay();
-
   const loadData = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -42,10 +37,8 @@ export default function PlanDetailPage({ planId, onBack, onRefresh }: PlanDetail
       ]);
       const planData = await planRes.json();
       const statsData = await statsRes.json();
-
       if (planData.plan) setPlan(planData.plan);
       else setError("计划不存在");
-
       if (statsData.stats) {
         setStats(statsData.stats);
         // 构建今日完成映射
@@ -60,13 +53,10 @@ export default function PlanDetailPage({ planId, onBack, onRefresh }: PlanDetail
       setLoading(false);
     }
   }, [planId]);
-
   useEffect(() => { loadData(); }, [loadData]);
-
   // 获取今天对应的训练日索引
   const todayDayIdx = plan?.days?.findIndex(d => d.day_of_week === todayDow) ?? -1;
   const displayDayIdx = activeDayIdx ?? (todayDayIdx >= 0 ? todayDayIdx : 0);
-
   // 切换动作完成状态
   const toggleExercise = async (day: PlanDay, exercise: PlanExercise) => {
     setCompleting(true);
@@ -100,7 +90,6 @@ export default function PlanDetailPage({ planId, onBack, onRefresh }: PlanDetail
       setCompleting(false);
     }
   };
-
   // 完成整个训练日
   const completeAllToday = async (day: PlanDay) => {
     if (!day.exercises || day.exercises.length === 0) return;
@@ -133,7 +122,6 @@ export default function PlanDetailPage({ planId, onBack, onRefresh }: PlanDetail
       setCompleting(false);
     }
   };
-
   // 删除计划
   const deletePlan = async () => {
     setDeleting(true);
@@ -152,7 +140,6 @@ export default function PlanDetailPage({ planId, onBack, onRefresh }: PlanDetail
       setShowDeleteConfirm(false);
     }
   };
-
   if (loading && !plan) {
     return (
       <div className="flex items-center justify-center h-48 text-gray-400 text-xs">
@@ -160,7 +147,6 @@ export default function PlanDetailPage({ planId, onBack, onRefresh }: PlanDetail
       </div>
     );
   }
-
   if (error && !plan) {
     return (
       <div className="card p-6 text-center">
@@ -170,13 +156,10 @@ export default function PlanDetailPage({ planId, onBack, onRefresh }: PlanDetail
       </div>
     );
   }
-
   if (!plan) return null;
-
   const days = (plan.days || []).sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0));
   const activeDay = days[displayDayIdx];
   const isToday = activeDay?.day_of_week === todayDow;
-
   return (
     <div className="space-y-3">
       {/* Header */}
@@ -209,7 +192,6 @@ export default function PlanDetailPage({ planId, onBack, onRefresh }: PlanDetail
           )}
         </div>
       </div>
-
       {/* 计划概览 */}
       <div className="card p-4 bg-gradient-to-br from-gray-50 to-white">
         <div className="flex items-start justify-between">
@@ -226,7 +208,9 @@ export default function PlanDetailPage({ planId, onBack, onRefresh }: PlanDetail
               </span>
               <span className="text-[10px] text-gray-500">
                 <CalendarDays className="w-2.5 h-2.5 inline mr-0.5" />
-                {plan.duration_weeks}周 · 每周{plan.workouts_per_week}练
+                {plan.duration_type === 'daily'
+                  ? `${plan.total_days || ''}天 · ${plan.total_rounds || ''}轮`
+                  : `${plan.duration_weeks}周 · 每周${plan.workouts_per_week}练`}
               </span>
             </div>
             {plan.notes && (
@@ -235,7 +219,6 @@ export default function PlanDetailPage({ planId, onBack, onRefresh }: PlanDetail
           </div>
         </div>
       </div>
-
       {/* 完成度总览 */}
       {stats && (
         <div className="grid grid-cols-2 gap-2">
@@ -265,7 +248,6 @@ export default function PlanDetailPage({ planId, onBack, onRefresh }: PlanDetail
           </div>
         </div>
       )}
-
       {/* 日期导航 */}
       <div className="card p-3">
         <div className="flex gap-1 overflow-x-auto pb-1 scrollbar-hide">
@@ -296,7 +278,6 @@ export default function PlanDetailPage({ planId, onBack, onRefresh }: PlanDetail
           })}
         </div>
       </div>
-
       {/* 当前选中日的内容 */}
       {activeDay && (
         <div className={`card overflow-hidden border-l-4 ${
@@ -341,14 +322,12 @@ export default function PlanDetailPage({ planId, onBack, onRefresh }: PlanDetail
               </button>
             )}
           </div>
-
           {/* Exercises */}
           {!activeDay.is_rest_day && activeDay.exercises && activeDay.exercises.length > 0 && (
             <div className="p-3 space-y-1.5">
               {activeDay.exercises.map((ex, i) => {
                 const isCompleted = todayCompletions.get(ex.id!) ?? false;
                 const isClickable = isToday;
-
                 return (
                   <div
                     key={ex.id || i}
@@ -374,7 +353,6 @@ export default function PlanDetailPage({ planId, onBack, onRefresh }: PlanDetail
                         {i + 1}
                       </div>
                     )}
-
                     {/* 动作详情 */}
                     <div className="flex-1 min-w-0">
                       <div className={`text-sm font-semibold truncate ${
@@ -393,7 +371,6 @@ export default function PlanDetailPage({ planId, onBack, onRefresh }: PlanDetail
                         )}
                       </div>
                     </div>
-
                     {/* 完成标记 */}
                     {isCompleted && (
                       <span className="text-[10px] font-medium text-green-600 shrink-0">已完成</span>
@@ -403,7 +380,6 @@ export default function PlanDetailPage({ planId, onBack, onRefresh }: PlanDetail
               })}
             </div>
           )}
-
           {/* 休息日展示 */}
           {activeDay.is_rest_day && (
             <div className="p-6 text-center">
@@ -414,7 +390,6 @@ export default function PlanDetailPage({ planId, onBack, onRefresh }: PlanDetail
               <p className="text-[11px] text-green-600/80 mt-1">好好恢复，肌肉在休息时生长</p>
             </div>
           )}
-
           {/* 空动作提示 */}
           {!activeDay.is_rest_day && (!activeDay.exercises || activeDay.exercises.length === 0) && (
             <div className="p-6 text-center">
@@ -424,7 +399,6 @@ export default function PlanDetailPage({ planId, onBack, onRefresh }: PlanDetail
           )}
         </div>
       )}
-
       {/* 今天不是训练日的提示 */}
       {todayDayIdx < 0 && (
         <div className="card p-4 bg-gradient-to-br from-green-50 to-white border-green-100 text-center">
@@ -435,7 +409,6 @@ export default function PlanDetailPage({ planId, onBack, onRefresh }: PlanDetail
           </p>
         </div>
       )}
-
       {/* 删除成功/失败提示 - 不需要额外操作，因为删除后会自动返回 */}
     </div>
   );

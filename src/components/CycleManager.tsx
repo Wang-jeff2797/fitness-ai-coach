@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from "react";
 import {
   Plus, Loader2, CheckCircle2, AlertCircle, Brain,
   ChevronLeft, Trash2, Edit3, Save, Target,
-  CalendarDays, Dumbbell, Sparkles, RotateCcw, TrendingUp, Zap,
+  CalendarDays, Dumbbell, Sparkles, RotateCcw, TrendingUp, Zap, List,
 } from "lucide-react";
 import type {
   Cycle, CyclePlan, PlanDay, PlanExercise, UserGoal, CycleAdjustment, PlanCompletionStats,
@@ -44,24 +44,30 @@ export default function CycleManager({ onRefresh }: CycleManagerProps) {
   // === 向导状态 ===
   const [wizStep, setWizStep] = useState(1);
   const [wizGoal, setWizGoal] = useState<UserGoal>("muscle_gain");
+  const [wizDurationType, setWizDurationType] = useState<'weekly' | 'daily'>('weekly');
   const [wizWeeks, setWizWeeks] = useState(4);
   const [wizPerWeek, setWizPerWeek] = useState(3);
+  // 天轮模式参数
+  const [wizTotalDays, setWizTotalDays] = useState(6);
+  const [wizTotalRounds, setWizTotalRounds] = useState(3);
   const [wizName, setWizName] = useState("");
   const [wizGenerating, setWizGenerating] = useState(false);
   const [wizResultPlanId, setWizResultPlanId] = useState<string | null>(null);
-  // 每日肌群关键字（wizPerWeek 长度的数组）
+  // 每日肌群关键字
   const [wizDayKeywords, setWizDayKeywords] = useState<string[]>(["push", "pull", "legs"]);
-  // 当 wizPerWeek 变化时同步 wizDayKeywords 长度
+  // 当训练日数量变化时同步 wizDayKeywords 长度
+  const wizTrainingDays = wizDurationType === 'daily' ? wizTotalDays : wizPerWeek;
   useEffect(() => {
     setWizDayKeywords(prev => {
-      if (prev.length === wizPerWeek) return prev;
-      if (prev.length < wizPerWeek) {
+      const targetLen = wizTrainingDays;
+      if (prev.length === targetLen) return prev;
+      if (prev.length < targetLen) {
         const defaults = ["push", "pull", "legs", "push", "upper", "full_body"];
-        return [...prev, ...defaults.slice(prev.length, wizPerWeek)];
+        return [...prev, ...defaults.slice(prev.length, targetLen)];
       }
-      return prev.slice(0, wizPerWeek);
+      return prev.slice(0, targetLen);
     });
-  }, [wizPerWeek]);
+  }, [wizTrainingDays]);
   const { colorMap } = useGoals();
   const triggerRefreshAll = () => { onRefresh?.(); loadAll(); };
   const loadAll = () => {
@@ -90,24 +96,33 @@ export default function CycleManager({ onRefresh }: CycleManagerProps) {
   };
   useEffect(() => { loadAll(); }, []);
   const resetWizard = () => {
-    setWizStep(1); setWizGoal("muscle_gain"); setWizWeeks(4);
-    setWizPerWeek(3); setWizName(""); setWizGenerating(false); setWizResultPlanId(null);
+    setWizStep(1); setWizGoal("muscle_gain");
+    setWizDurationType('weekly'); setWizWeeks(4); setWizPerWeek(3);
+    setWizTotalDays(6); setWizTotalRounds(3);
+    setWizName(""); setWizGenerating(false); setWizResultPlanId(null);
     setView("list");
   };
   const doGeneratePlan = async () => {
     setError(null);
     setWizGenerating(true);
     try {
+      const baseReq: any = {
+        goal: wizGoal,
+        duration_type: wizDurationType,
+        name: wizName.trim() || undefined,
+        day_keywords: wizDayKeywords,
+      };
+      if (wizDurationType === 'daily') {
+        baseReq.total_days = wizTotalDays;
+        baseReq.total_rounds = wizTotalRounds;
+      } else {
+        baseReq.duration_weeks = wizWeeks;
+        baseReq.workouts_per_week = wizPerWeek;
+      }
       const res = await fetch("/api/cycle-plans", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          goal: wizGoal,
-          duration_weeks: wizWeeks,
-          workouts_per_week: wizPerWeek,
-          name: wizName.trim() || undefined,
-          day_keywords: wizDayKeywords,
-        }),
+        body: JSON.stringify(baseReq),
       });
       const d = await res.json();
       if (!res.ok) throw new Error(d.error || "生成失败");
@@ -231,46 +246,102 @@ export default function CycleManager({ onRefresh }: CycleManagerProps) {
       {wizStep === 2 && (
         <div className="card p-4 space-y-4">
           <h3 className="text-sm font-semibold text-gray-900">设定周期参数</h3>
+          {/* 模式切换 */}
+          <div>
+            <label className="text-xs font-medium text-gray-600 mb-1.5 block">周期模式</label>
+            <div className="flex gap-2">
+              <button onClick={() => setWizDurationType('weekly')}
+                className={`flex-1 py-2 rounded-xl text-xs font-semibold transition-colors ${
+                  wizDurationType === 'weekly'
+                    ? 'bg-primary-600 text-white' : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+                }`}>
+                <CalendarDays className="w-3.5 h-3.5 inline mr-1" />按周
+              </button>
+              <button onClick={() => setWizDurationType('daily')}
+                className={`flex-1 py-2 rounded-xl text-xs font-semibold transition-colors ${
+                  wizDurationType === 'daily'
+                    ? 'bg-primary-600 text-white' : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+                }`}>
+                <List className="w-3.5 h-3.5 inline mr-1" />按天轮
+              </button>
+            </div>
+          </div>
           <div>
             <label className="text-xs font-medium text-gray-600 mb-1.5 block">周期名称（可选）</label>
             <input value={wizName} onChange={e => setWizName(e.target.value)}
-              placeholder={`${wizWeeks}周${GOAL_OPTS.find(o=>o.value===wizGoal)?.label}周期`}
+              placeholder={wizDurationType === 'weekly'
+                ? `${wizWeeks}周${GOAL_OPTS.find(o=>o.value===wizGoal)?.label}周期`
+                : `${wizTotalDays}天${wizTotalRounds}轮${GOAL_OPTS.find(o=>o.value===wizGoal)?.label}计划`}
               className="input-field text-sm" />
           </div>
-          <div>
-            <label className="text-xs font-medium text-gray-600 mb-1.5 block">
-              周期时长：<span className="text-primary-600 font-bold">{wizWeeks} 周</span>
-            </label>
-            <input type="range" min={2} max={12} value={wizWeeks}
-              onChange={e => setWizWeeks(Number(e.target.value))}
-              className="w-full accent-primary-600" />
-            <div className="flex justify-between text-[10px] text-gray-400">
-              <span>2周</span><span>12周</span>
-            </div>
-          </div>
-          <div>
-            <label className="text-xs font-medium text-gray-600 mb-1.5 block">
-              每周训练次数：<span className="text-primary-600 font-bold">{wizPerWeek} 天</span>
-            </label>
-            <div className="grid grid-cols-4 gap-1.5">
-              {[3, 4, 5, 6].map(n => (
-                <button key={n} onClick={() => setWizPerWeek(n)}
-                  className={`py-2 rounded-xl text-xs font-semibold transition-colors ${
-                    wizPerWeek === n
-                      ? "bg-primary-600 text-white"
-                      : "bg-gray-50 text-gray-600 hover:bg-gray-100"
-                  }`}
-                >{n} 天</button>
-              ))}
-            </div>
-          </div>
+          {wizDurationType === 'weekly' ? (
+            <>
+              <div>
+                <label className="text-xs font-medium text-gray-600 mb-1.5 block">
+                  周期时长：<span className="text-primary-600 font-bold">{wizWeeks} 周</span>
+                </label>
+                <input type="range" min={2} max={12} value={wizWeeks}
+                  onChange={e => setWizWeeks(Number(e.target.value))}
+                  className="w-full accent-primary-600" />
+                <div className="flex justify-between text-[10px] text-gray-400">
+                  <span>2周</span><span>12周</span>
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-600 mb-1.5 block">
+                  每周训练次数：<span className="text-primary-600 font-bold">{wizPerWeek} 天</span>
+                </label>
+                <div className="grid grid-cols-4 gap-1.5">
+                  {[3, 4, 5, 6].map(n => (
+                    <button key={n} onClick={() => setWizPerWeek(n)}
+                      className={`py-2 rounded-xl text-xs font-semibold transition-colors ${
+                        wizPerWeek === n
+                          ? "bg-primary-600 text-white"
+                          : "bg-gray-50 text-gray-600 hover:bg-gray-100"
+                      }`}
+                    >{n} 天</button>
+                  ))}
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
+              <div>
+                <label className="text-xs font-medium text-gray-600 mb-1.5 block">
+                  一轮包含天数：<span className="text-primary-600 font-bold">{wizTotalDays} 天</span>
+                </label>
+                <input type="range" min={3} max={21} value={wizTotalDays}
+                  onChange={e => setWizTotalDays(Number(e.target.value))}
+                  className="w-full accent-primary-600" />
+                <div className="flex justify-between text-[10px] text-gray-400">
+                  <span>3天</span><span>21天</span>
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-600 mb-1.5 block">
+                  重复轮数：<span className="text-primary-600 font-bold">{wizTotalRounds} 轮</span>
+                </label>
+                <div className="grid grid-cols-5 gap-1.5">
+                  {[1, 2, 3, 4, 5].map(n => (
+                    <button key={n} onClick={() => setWizTotalRounds(n)}
+                      className={`py-2 rounded-xl text-xs font-semibold transition-colors ${
+                        wizTotalRounds === n
+                          ? "bg-primary-600 text-white"
+                          : "bg-gray-50 text-gray-600 hover:bg-gray-100"
+                      }`}
+                    >{n} 轮</button>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
           {/* 每日肌群分配 */}
           <div>
             <label className="text-xs font-medium text-gray-600 mb-1.5 block">
               每个训练日主要肌群：
             </label>
-            <div className="space-y-2">
-              {Array.from({ length: wizPerWeek }).map((_, i) => (
+            <div className="space-y-2 max-h-48 overflow-y-auto">
+              {Array.from({ length: wizTrainingDays }).map((_, i) => (
                 <div key={i} className="flex items-center gap-2">
                   <span className="text-[11px] text-gray-400 w-10 shrink-0">日{i + 1}</span>
                   <div className="flex gap-1 overflow-x-auto pb-1 scrollbar-hide">
@@ -310,7 +381,10 @@ export default function CycleManager({ onRefresh }: CycleManagerProps) {
           <div>
             <h3 className="text-base font-bold text-gray-900">由 AI 定制训练计划</h3>
             <p className="text-[11px] text-gray-500 mt-1">
-              目标：{GOAL_OPTS.find(o => o.value === wizGoal)?.label} · {wizWeeks} 周 · 每周 {wizPerWeek} 练
+              目标：{GOAL_OPTS.find(o => o.value === wizGoal)?.label}
+              {wizDurationType === 'daily'
+                ? ` · ${wizTotalDays} 天 × ${wizTotalRounds} 轮`
+                : ` · ${wizWeeks} 周 · 每周 ${wizPerWeek} 练`}
             </p>
           </div>
           <div className="text-left bg-gray-50 rounded-xl p-3 space-y-1.5">
@@ -491,7 +565,11 @@ export default function CycleManager({ onRefresh }: CycleManagerProps) {
               <span className={`px-2 py-0.5 text-[10px] font-semibold rounded-full border ${colorMap[p.goal]}`}>
                 {GOAL_OPTS.find(o=>o.value===p.goal)?.label || "通用"}
               </span>
-              <span className="text-[10px] text-gray-400">{p.duration_weeks}周 · {p.workouts_per_week}练/周</span>
+              <span className="text-[10px] text-gray-400">
+                {p.duration_type === 'daily'
+                  ? `${p.total_days}天 · ${p.total_rounds}轮`
+                  : `${p.duration_weeks}周 · ${p.workouts_per_week}练/周`}
+              </span>
             </div>
             <h3 className="text-sm font-semibold text-gray-900">{p.name}</h3>
             {cycle && <p className="text-[10px] text-gray-500 mt-0.5">关联周期：{cycle.name}</p>}
@@ -545,7 +623,15 @@ export default function CycleManager({ onRefresh }: CycleManagerProps) {
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>
                   {!cycleOfPlan(p.id!) && (
-                    <button onClick={() => { setWizResultPlanId(p.id!); setWizGoal(p.goal); setWizWeeks(p.duration_weeks); setWizPerWeek(p.workouts_per_week); activatePlanAsCycle(p.id!) }}
+                    <button onClick={() => {
+                      setWizResultPlanId(p.id!); setWizGoal(p.goal);
+                      if (p.duration_type === 'daily') {
+                        setWizDurationType('daily'); setWizTotalDays(p.total_days || 5); setWizTotalRounds(p.total_rounds || 3);
+                      } else {
+                        setWizDurationType('weekly'); setWizWeeks(p.duration_weeks || 4); setWizPerWeek(p.workouts_per_week || 3);
+                      }
+                      activatePlanAsCycle(p.id!)
+                    }}
                       className="btn-primary text-[11px] py-2 px-3">激活</button>
                   )}
                 </>
@@ -830,7 +916,9 @@ function PlanEditor({
           </span>
           <span className="text-[10px] text-gray-500">
             <CalendarDays className="w-2.5 h-2.5 inline mr-0.5" />
-            {local.duration_weeks}周 · 每周{local.workouts_per_week}练
+            {local.duration_type === 'daily'
+              ? `${local.total_days || ''}天 · ${local.total_rounds || ''}轮`
+              : `${local.duration_weeks}周 · 每周${local.workouts_per_week}练`}
           </span>
           {local.tdee_adjusted && (
             <span className="text-[10px] text-gray-500">
@@ -856,20 +944,54 @@ function PlanEditor({
         )}
         {editing && (
           <div className="grid grid-cols-2 gap-2 mt-3">
-            <div>
-              <label className="text-[10px] text-gray-500">周期(周)</label>
-              <input type="number" min={1} max={24}
-                value={local.duration_weeks}
-                onChange={e => setLocal(p => ({ ...p, duration_weeks: Number(e.target.value) }))}
-                className="input-field text-xs" />
+            <div className="col-span-2">
+              <label className="text-[10px] text-gray-500">周期模式</label>
+              <div className="flex gap-1.5 mt-1">
+                <button onClick={() => setLocal(p => ({ ...p, duration_type: 'weekly' as const, duration_weeks: p.duration_weeks || 4, workouts_per_week: p.workouts_per_week || 3, total_days: undefined, total_rounds: undefined }))}
+                  className={`flex-1 py-1.5 rounded-xl text-[11px] font-medium transition-colors ${local.duration_type !== 'daily' ? 'bg-primary-100 text-primary-700' : 'bg-gray-50 text-gray-500'}`}>
+                  按周
+                </button>
+                <button onClick={() => setLocal(p => ({ ...p, duration_type: 'daily' as const, total_days: p.total_days || 6, total_rounds: p.total_rounds || 3, duration_weeks: undefined, workouts_per_week: undefined }))}
+                  className={`flex-1 py-1.5 rounded-xl text-[11px] font-medium transition-colors ${local.duration_type === 'daily' ? 'bg-primary-100 text-primary-700' : 'bg-gray-50 text-gray-500'}`}>
+                  按天轮
+                </button>
+              </div>
             </div>
-            <div>
-              <label className="text-[10px] text-gray-500">每周练</label>
-              <input type="number" min={1} max={7}
-                value={local.workouts_per_week}
-                onChange={e => setLocal(p => ({ ...p, workouts_per_week: Number(e.target.value) }))}
-                className="input-field text-xs" />
-            </div>
+            {local.duration_type === 'daily' ? (
+              <>
+                <div>
+                  <label className="text-[10px] text-gray-500">总天数</label>
+                  <input type="number" min={3} max={30}
+                    value={local.total_days || 6}
+                    onChange={e => setLocal(p => ({ ...p, total_days: Number(e.target.value) }))}
+                    className="input-field text-xs" />
+                </div>
+                <div>
+                  <label className="text-[10px] text-gray-500">轮数</label>
+                  <input type="number" min={1} max={10}
+                    value={local.total_rounds || 3}
+                    onChange={e => setLocal(p => ({ ...p, total_rounds: Number(e.target.value) }))}
+                    className="input-field text-xs" />
+                </div>
+              </>
+            ) : (
+              <>
+                <div>
+                  <label className="text-[10px] text-gray-500">周期(周)</label>
+                  <input type="number" min={1} max={24}
+                    value={local.duration_weeks || 4}
+                    onChange={e => setLocal(p => ({ ...p, duration_weeks: Number(e.target.value) }))}
+                    className="input-field text-xs" />
+                </div>
+                <div>
+                  <label className="text-[10px] text-gray-500">每周练</label>
+                  <input type="number" min={1} max={7}
+                    value={local.workouts_per_week || 3}
+                    onChange={e => setLocal(p => ({ ...p, workouts_per_week: Number(e.target.value) }))}
+                    className="input-field text-xs" />
+                </div>
+              </>
+            )}
             <div className="col-span-2">
               <label className="text-[10px] text-gray-500">备注 / 周期说明</label>
               <textarea

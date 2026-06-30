@@ -299,8 +299,16 @@ export interface CyclePlan {
   cycle_id?: string | null;
   name: string;
   goal: UserGoal;
-  duration_weeks: number;
-  workouts_per_week: number;
+  /** 'weekly' = 按周重复（默认）, 'daily' = 按天轮重复 */
+  duration_type?: 'weekly' | 'daily';
+  /** 周模式：持续周数 */
+  duration_weeks?: number;
+  /** 周模式：每周训练次数 */
+  workouts_per_week?: number;
+  /** 天轮模式：一轮包含的总训练天数 */
+  total_days?: number;
+  /** 天轮模式：重复轮数 */
+  total_rounds?: number;
   start_date: string;
   notes?: string | null;
   days?: PlanDay[];
@@ -310,8 +318,14 @@ export interface CyclePlan {
 }
 export interface GeneratePlanRequest {
   goal: UserGoal;
-  duration_weeks: number;
-  workouts_per_week: number;
+  /** 'weekly'（默认）或 'daily' */
+  duration_type?: 'weekly' | 'daily';
+  /** 周模式专用 */
+  duration_weeks?: number;
+  workouts_per_week?: number;
+  /** 天轮模式专用 */
+  total_days?: number;
+  total_rounds?: number;
   name?: string;
   day_keywords?: string[];
   preferences_context?: { muscle_group: string; exercises: string[] }[];
